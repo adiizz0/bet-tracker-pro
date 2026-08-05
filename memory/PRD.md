@@ -5,21 +5,19 @@ Meglévő `github.com/adiizz0/bet-tracker-pro` repót előkészíteni teljes Ver
 
 ## Architektúra
 ```
-Vercel Project (monorepo)
-├── /              → React (frontend/, static-build, distDir=build)
-└── /api/*         → FastAPI Serverless Function (api/index.py, @vercel/python)
+Vercel Project (Services)
+├── frontend service   → React (frontend/, framework: create-react-app)
+└── backend  service   → FastAPI (backend/server.py, framework: fastapi, entrypoint: server:app)
         └──> MongoDB Atlas (Vercel Marketplace-en át provisionálva)
 ```
 
-## Elkészült komponensek (2026-01)
-1. **Repo 2 klón**: `/tmp/clones/bet-tracker-pro-1` és `/tmp/clones/bet-tracker-pro-2` — mindkettőben ugyanaz a Vercel setup commit
-2. **`vercel.json`** — `@vercel/python` (api/) + `@vercel/static-build` (frontend/), route: `/api/(.*)` → api function, minden más → SPA index.html fallback (filesystem handle-lel)
-3. **`api/index.py`** — vékony ASGI wrapper: `sys.path`-hoz adja a `backend/` mappát és importálja a `server:app` FastAPI példányt
-4. **`requirements.txt`** (root) — Minimal Python deps a serverless futáshoz: fastapi, motor, pymongo, bcrypt, PyJWT, reportlab, httpx, requests, pydantic, email-validator, python-multipart, python-dotenv
-5. **`.python-version`** = `3.12`
-6. **`.vercelignore`** — kizárja: docker-compose, netlify.toml, tests/, memory/, __pycache__, node_modules
-7. **`DEPLOY_VERCEL.md`** — lépésről lépésre útmutató (MongoDB Atlas Marketplace, env változók, deploy, verifikáció, hibaelhárítás)
-8. **`README.md`** frissítve, hogy a Vercel legyen az ajánlott deploy útvonal
+## Elkészült komponensek (2026-01, második iteráció)
+1. **Repo 2 klón**: `/app/clones/bet-tracker-pro-1` és `/app/clones/bet-tracker-pro-2` — mindkettőben azonos állapot, 2 commit
+2. **`vercel.json`** — új **Services** formátum (`services` + `rewrites` `type: service`), ahogy a Vercel dashboard javasolja monorepo felismeréskor
+3. **`backend/requirements.txt`** — 127-ről 13 csomagra csökkentve (serverless bundle méret miatt): fastapi, motor, pymongo, bcrypt, PyJWT, reportlab, httpx, requests, pydantic, email-validator, python-multipart, python-dotenv, starlette
+4. **`backend/.python-version`** = `3.12`
+5. **`DEPLOY_VERCEL.md`** — átírva az új Services architektúrához
+6. **Törölve**: `api/index.py`, root `requirements.txt`, root `.python-version` (nem kellenek Services módban)
 
 ## Env változók, amiket a user Vercel Dashboard-on beállít
 - `MONGO_URL` (a `MONGODB_URI` másolataként, az Atlas Marketplace integráció után)
