@@ -1,0 +1,37 @@
+{
+  "summary": "Backend regression 100% pass (7/7). Frontend LOCAL runtime is BROKEN by the ajv/ajv-keywords resolutions added to package.json: dev server crashes on boot with 'Unknown keyword formatMinimum' from fork-ts-checker-webpack-plugin's nested schema-utils@2.7.0 (which expects ajv@6 + ajv-keywords@3.x, but yarn resolutions forced ajv-keywords@5.1.0 globally). Public preview URL returns 502 for the frontend HTML (backend /api/ still works). Cannot execute frontend login flow test.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Frontend boot (yarn start / craco start)",
+        "issue": "Crash at startup: 'Error: Unknown keyword formatMinimum' at /app/frontend/node_modules/ajv-keywords/dist/index.js:25, triggered from fork-ts-checker-webpack-plugin/node_modules/schema-utils/dist/validate.js:56. Root cause: package.json 'resolutions' contains 'ajv-keywords': '^5.1.0' (needs ajv v8), but fork-ts-checker-webpack-plugin bundles schema-utils@2.7.0 which uses ajv@^6.12.2 + ajv-keywords@^3.4.1. The global yarn resolution forces ajv-keywords@5.1.0 into that ajv@6 context, causing the incompatibility. Result: supervisor restarts frontend in a loop; public URL returns HTTP 502 (Cloudflare Bad Gateway).",
+        "affected_selectors": []
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_regression.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "URGENT: Fix the ajv/ajv-keywords pin in /app/frontend/package.json. Two options: (a) SCOPE the yarn resolution so it does NOT apply to fork-ts-checker-webpack-plugin's nested schema-utils, e.g. drop the top-level 'ajv-keywords': '^5.1.0' from 'resolutions' entirely and instead scope to the specific path used by craco/CRA build (e.g. '**/schema-utils@^4/ajv-keywords') OR pin only for craco build path; (b) keep the npm 'overrides' pin (for Vercel/npm build) but REMOVE 'ajv' and 'ajv-keywords' from yarn 'resolutions'. Then rerun `yarn install` and `sudo supervisorctl restart frontend`.",
+    "After fix, verify /var/log/supervisor/frontend.err.log is clean and the preview URL returns the login page.",
+    "Re-run frontend login flow test (admin@bettracker.pro / admin123) to confirm end-to-end works."
+  ],
+  "critical_code_review_comments": [
+    "Yarn 'resolutions' is a blunt instrument — pinning ajv-keywords@^5.1.0 globally forces it into ALL nested schema-utils consumers, including ones (like fork-ts-checker-webpack-plugin's schema-utils@2.7.0) that still depend on ajv@6. Prefer selective glob patterns like '**/react-scripts/**/ajv-keywords': '^5.1.0' or leave the yarn side alone if only the npm/Vercel build needs the override.",
+    "The npm 'overrides' block (for Vercel) can remain since Vercel uses npm; but the parallel yarn 'resolutions' entry is what's breaking the local Kubernetes preview.",
+    "server.py is still 929 lines — flagged in iteration_1, still pending split into routers."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "0% (dev server won't boot; 502 at preview URL)"},
+  "test_credentials": "admin@bettracker.pro / admin123 (auto-seeded, backend-verified)",
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression suite at /app/backend/tests/test_regression.py — 7/7 passing, unchanged. Frontend build/runtime is broken by the yarn 'resolutions' entries for 'ajv' and 'ajv-keywords' added in this iteration to /app/frontend/package.json. Error signature: 'Error: Unknown keyword formatMinimum' from fork-ts-checker-webpack-plugin/node_modules/schema-utils@2.7.0. Once main agent removes ajv/ajv-keywords from yarn 'resolutions' (keeping only the npm 'overrides' for Vercel), re-run: yarn install && sudo supervisorctl restart frontend && retest login flow.",
+  "rca of the issue": "Root cause: /app/frontend/package.json 'resolutions' block was extended with 'ajv': '^8.17.1' and 'ajv-keywords': '^5.1.0' to fix a Vercel npm build error. Yarn 'resolutions' apply globally to every nested dependency in the tree. fork-ts-checker-webpack-plugin@6.x bundles its own schema-utils@2.7.0 (deps: ajv ^6.12.2, ajv-keywords ^3.4.1). Forcing ajv-keywords to 5.1.0 in that ajv@6 context makes it try to register the 'formatMinimum' keyword using ajv v8 APIs against an ajv v6 instance, which throws 'Unknown keyword formatMinimum' during craco start and crashes the dev server. Reproduction: `sudo supervisorctl status frontend` shows repeated STARTING→BACKOFF; `tail /var/log/supervisor/frontend.err.log` shows the ajv-keywords error at index.js:25. Mitigation: remove 'ajv' and 'ajv-keywords' from the 'resolutions' block (keep them in 'overrides' only, since npm/Vercel is the consumer that needed the pin), then `yarn install && sudo supervisorctl restart frontend`."
+}
