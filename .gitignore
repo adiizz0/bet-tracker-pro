@@ -79,10 +79,22 @@ agenthub/agents/youtube/db
 memory/test_credentials.md
 
 # Mobile development
-android-sdk/
-.env
-.env.*
-*.env
+android-sdk/frontend/node_modules/.cache/default-development/2.pack
+frontend/node_modules/.cache/default-development/4.pack
+frontend/node_modules/.cache/default-development/2.pack
+frontend/node_modules/.cache/default-development/5.pack
 credentials.json
 *.key
 .credentials
+frontend/node_modules/.cache/default-development/7.pack
+frontend/node_modules/.cache/default-development/11.pack
+frontend/node_modules/.cache/default-development/12.pack
+.env
+.env.*
+*.env
+frontend/node_modules/.cache/default-development/0.pack
+frontend/node_modules/.cache/default-development/1.pack
+frontend/node_modules/.cache/default-development/3.pack
+
+# Local backup clones (not for Github)
+clones/

@@ -13,6 +13,9 @@ module.exports = {
         sm: 'calc(var(--radius) - 4px)'
       },
       colors: {
+        profit: '#00E676',
+        loss: '#FF3B30',
+        warning: '#FFCC00',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
         card: {
