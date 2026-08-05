@@ -2,7 +2,9 @@
   "services": {
     "frontend": {
       "root": "frontend",
-      "framework": "create-react-app"
+      "framework": "create-react-app",
+      "installCommand": "yarn install --frozen-lockfile",
+      "buildCommand": "yarn build"
     },
     "backend": {
       "root": "backend",
