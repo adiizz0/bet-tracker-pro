@@ -55,6 +55,11 @@ api_router = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+if JWT_SECRET.startswith("CHANGE_ME"):
+    logger.warning("JWT_SECRET env var is NOT set — using an insecure fallback. Set JWT_SECRET on Vercel!")
+if not os.environ.get('MONGO_URL'):
+    logger.warning("MONGO_URL env var is NOT set — using localhost fallback. Set MONGO_URL on Vercel!")
+
 
 # ---------------- Auth helpers ----------------
 def hash_password(password: str) -> str:

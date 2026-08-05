@@ -1,107 +1,114 @@
 # Deploy Bet Tracker Pro to Vercel (Multi-Service)
 
-Ez a repo a Vercel **új Services** architektúráját használja: **frontend + FastAPI backend + MongoDB Atlas**, minden egy Vercel projektben.
+Ez a repo a Vercel **Services** architektúráját használja: **frontend + FastAPI backend + MongoDB Atlas**, minden egy Vercel projektben.
 
 ```
 Vercel Project (Services)
-├── frontend service   → React (frontend/, create-react-app)
-└── backend  service   → FastAPI (backend/server.py, "fastapi" framework)
+├── frontend service   → React (frontend/, framework: create-react-app, yarn install)
+└── backend  service   → FastAPI (backend/server.py, framework: fastapi)
         └──> MongoDB Atlas (Vercel Marketplace-en át provisionálva)
 ```
 
-Kulcs fájlok:
-- **`vercel.json`** — a `services` blokk definiálja mindkettőt, a `rewrites` a `/api/*`-t a backendre, minden mást a frontendre irányít
-- **`backend/server.py`** — FastAPI app, `app = FastAPI()` a modul szinten (Vercel auto-detektálja)
-- **`backend/requirements.txt`** — minimál Python deps (~13 csomag)
-- **`backend/.python-version`** = `3.12`
-- **`frontend/`** — CRA + craco (érintetlen)
+---
+
+## ⚡ KRITIKUS — ELÖSZÖR OLVASD EL
+
+Az első deploy után az összes `/api/*` **500 hibát** dob, ha az env változók hiányoznak. A backend log egyértelmű: `KeyError: 'DB_NAME'`, `MONGO_URL` stb. — a Python modul importja már bukik.
+
+**Minimális env változó lista, ami nélkül SEMMI nem működik:**
+
+| Név | Érték | Kritikus |
+|-----|-------|----------|
+| `MONGO_URL` | MongoDB Atlas connection string | 🔴 KELL |
+| `DB_NAME` | `bettracker` | 🔴 KELL |
+| `JWT_SECRET` | 64 karakteres random string | 🔴 KELL |
+| `ADMIN_EMAIL` | `admin@bettracker.pro` | 🟡 admin seedhez |
+| `ADMIN_PASSWORD` | `admin123` | 🟡 admin seedhez |
+| `COOKIE_SECURE` | `true` | 🟢 default true |
+| `COOKIE_SAMESITE` | `lax` | 🟢 default lax |
+| `ODDS_API_KEY` | the-odds-api kulcsod | 🟢 opcionális |
+| `CORS_ORIGINS` | Vercel URL vagy `*` | 🟢 default `*` |
+
+**Google Sign-In opcionális env változói** (csak ha akarod):
+| Név | Érték |
+|-----|-------|
+| `GOOGLE_CLIENT_ID` | Google Cloud Console OAuth 2.0 Client ID |
+| `GOOGLE_CLIENT_SECRET` | Google Cloud Console Client Secret |
+
+Ha ezek nincsenek beállítva, a Google button **automatikusan eltűnik** a Login képernyőről. Nem tör el semmit.
 
 ---
 
 ## 1) MongoDB Atlas — a Vercel Marketplace-ből
 
-1. Vercel Dashboard → a projekt neve → **Storage** fül → **Create Database** → **MongoDB Atlas**
-2. Válaszd az **M0 (Free)** klasztert, régió pl. `Frankfurt (eu-central-1)`
-3. **Connect** — az integráció automatikusan létrehoz egy `MONGODB_URI` env változót minden környezetben
-4. Másold át `MONGODB_URI` értékét a **`MONGO_URL`** nevű env változóba is (a backend ezt olvassa):
-   - Settings → Environment Variables → Add
-   - Név: `MONGO_URL`, Érték: ugyanaz mint `MONGODB_URI`
-   - Environments: Production, Preview, Development
-5. Redeploy szükséges, hogy az env változó életbe lépjen.
+1. Vercel Dashboard → projekt → **Storage** fül → **Create Database** → **MongoDB Atlas**
+2. **M0 (Free)** klaszter, régió pl. `Frankfurt (eu-central-1)`
+3. **Connect** — auto-létrehoz `MONGODB_URI` env változót
+4. Másold át `MONGODB_URI` értékét **`MONGO_URL`** nevű env változóba (a backend ezt olvassa)
+5. Add hozzá **`DB_NAME=bettracker`** env változót
 
-> Alternatíva: saját [MongoDB Atlas](https://cloud.mongodb.com) fiókkal M0 klaszter, hálózati whitelist `0.0.0.0/0`, connection stringet közvetlenül `MONGO_URL`-be.
+> Alternatíva: saját [MongoDB Atlas](https://cloud.mongodb.com) fiók → M0 klaszter → Network Access → whitelist `0.0.0.0/0` → connection stringet közvetlenül `MONGO_URL`-be.
 
 ---
 
-## 2) Environment Variables (Vercel Dashboard)
+## 2) Google OAuth 2.0 setup (opcionális, ha kell "Belépés Google-lel")
 
-Settings → **Environment Variables** → Add for **Production + Preview + Development**:
-
-| Név              | Érték                                                                                          |
-|------------------|------------------------------------------------------------------------------------------------|
-| `MONGO_URL`      | (MongoDB Atlas connection string — a `MONGODB_URI`-ból másolva)                                |
-| `DB_NAME`        | `bettracker`                                                                                   |
-| `JWT_SECRET`     | `JApHbcqIb_lfcvWI4y0WowSYpvKPIgUQbXc3nO_AvrJ28Yz5Rs-OHtsvhTxY2ZEdNcm_pY5CnXRDujfPlxn_1w`       |
-| `ODDS_API_KEY`   | (a the-odds-api kulcsod)                                                                       |
-| `CORS_ORIGINS`   | `https://<a-vercel-doméned>.vercel.app`                                                        |
-| `ADMIN_EMAIL`    | `admin@bettracker.pro`                                                                         |
-| `ADMIN_PASSWORD` | `admin123` (első deploy után **CSERÉLD LE** az admin UI-ból)                                    |
-| `COOKIE_SECURE`  | `true`                                                                                         |
-| `COOKIE_SAMESITE`| `lax`                                                                                          |
-
-> A frontend nem igényel külön env változót — same-origin `/api` hívásokat használ.
-
-Új JWT_SECRET generálás helyben:
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(64))"
-```
+1. [Google Cloud Console](https://console.cloud.google.com/) → új projekt (pl. "Bet Tracker Pro")
+2. **APIs & Services → OAuth consent screen** → External → alap adatok kitöltése
+3. **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**
+4. Application type: **Web application**
+5. **Authorized JavaScript origins**:
+   - `https://<your-vercel-domain>.vercel.app`
+   - `http://localhost:3000` (opcionális, lokál devhez)
+6. **Authorized redirect URIs**:
+   - `https://<your-vercel-domain>.vercel.app/api/auth/google/callback`
+   - `http://localhost:3000/api/auth/google/callback` (opcionális)
+7. Create → másold ki a **Client ID** és **Client Secret** értékeket
+8. Vercel → Settings → Environment Variables → add:
+   - `GOOGLE_CLIENT_ID` = a Client ID
+   - `GOOGLE_CLIENT_SECRET` = a Client Secret
+9. Redeploy
 
 ---
 
 ## 3) Deploy lépések
 
-1. **Push GitHubra**:
-   ```bash
-   git add .
-   git commit -m "Add Vercel Services config (frontend + backend)"
-   git push origin main
-   ```
-
-2. **Vercel Import** (ha még nincs projekt):
-   - vercel.com → Add New… → **Project** → Import a `bet-tracker-pro` repót
-   - **Build setting: Services** (a Vercel automatikusan felismeri a `vercel.json` `services` blokkját)
-   - Root Directory: **.** (a repo gyökere)
-   - Deploy
-
-3. **MongoDB Atlas integráció** (első deploy után): lásd 1. pont
-
-4. **Redeploy** miután minden env változó a helyén van: Deployments → utolsó → ⋯ → **Redeploy**
+1. **Push GitHubra** (Save to Github → Force Push)
+2. **Vercel Import** (ha még nincs projekt): Framework: **Other**, Root Directory: `.`
+3. **Env változók beírása** (2. szekció fenti táblázata)
+4. **MongoDB Atlas hozzácsatolása** (1. szekció)
+5. **Deployments → Redeploy** (kikapcsolni: "Use existing Build Cache")
 
 ---
 
 ## 4) Verifikáció
 
-Nyisd meg: `https://<a-vercel-doméned>.vercel.app`
+Nyisd meg: `https://<your-vercel-domain>.vercel.app`
 
+- Register: új email + jelszó → belépés, bankroll létrejön
 - Login: `admin@bettracker.pro` / `admin123`
-- API health-check: `https://<a-vercel-doméned>.vercel.app/api/` → `{"message":"Bet Tracker Pro API"}`
-- Regisztrálj egy új usert, adj hozzá bet-et, generálj PDF jelentést
+- (Ha Google OAuth beállítva) "Belépés Google-lel" gomb megjelenik
+- API health-check: `https://<your-vercel-domain>.vercel.app/api/` → `{"message":"Bet Tracker Pro API"}`
 
-**Első dolog deploy után**: cseréld le az admin jelszót.
+**Első dolog deploy után**: cseréld le az admin jelszót új admin userrel (regisztrálj magadnak, majd DB-ben töröld az `admin@bettracker.pro`-t vagy tartsd a saját userednek).
 
 ---
 
 ## 5) Hibaelhárítás
 
-- **`vercel.json required to deploy projects with multiple services`**: ez a repo már tartalmazza. Ha mégis látod, csekkold hogy a `vercel.json` a repo gyökerében van és a `services` kulccsal kezdődik.
-- **500 error `/api/*`-on**: Vercel Dashboard → Deployments → aktív → válaszd a **backend** service-t → **Logs**. Leggyakoribb: `MONGO_URL` vagy `JWT_SECRET` nincs beállítva → redeploy.
-- **`Deployment size exceeded`**: a `backend/requirements.txt` már a minimál 13 csomag. Ha növelnéd, nézd meg a Vercel limitet (250MB uncompressed).
-- **Cold start lassú**: első hívás 2-5s (serverless natúra). Következő hívások gyorsak, amíg a function melegen marad.
-- **CORS hiba**: a frontend és a backend ugyanazon a doménen van, így nem szabadna. Ha mégis: állítsd be `CORS_ORIGINS`-t a pontos Vercel URL-lel.
-- **`ODDS_API_KEY` limit**: enélkül (vagy limit felett) a `/api/odds/*` automatikusan demó adatokat ad vissza, nem tör el az UI.
+### 500 error a `/api/*`-on
+- **Ha `KeyError: 'MONGO_URL'` vagy `KeyError: 'DB_NAME'`**: env változó hiányzik. Add be Vercel Settings → Env Vars-ba → Redeploy
+- **Ha `pymongo.errors.ServerSelectionTimeoutError`**: MongoDB Atlas → Network Access → whitelist nem `0.0.0.0/0`
+- **Ha `jwt.InvalidTokenError`**: `JWT_SECRET` nincs beállítva, vagy megváltoztattad (kilépteti az összes usert — normális)
 
----
+### Google login hibák
+- **"Google bejelentkezés nincs konfigurálva"**: `GOOGLE_CLIENT_ID` vagy `GOOGLE_CLIENT_SECRET` hiányzik Vercel env-ből
+- **Redirect URI mismatch**: Google Cloud Console → Credentials → OAuth Client → Authorized redirect URIs-ban NEM SZEREPEL a pontos Vercel URL + `/api/auth/google/callback`
+- **"Access blocked: App is not verified"**: OAuth consent screen még nem publikáltál — Test users listába add hozzá a saját Google email-ed
 
-## 6) Custom domain (opcionális)
+### Frontend nem éri el a backendet
+- **`REACT_APP_BACKEND_URL`**: HAGYD ÜRESEN vagy ne is állítsd be — same-origin `/api` hívásokat használ
 
-Vercel → Settings → Domains → Add — DNS beállítás után automatikusan HTTPS-t kap. Ne felejtsd frissíteni a `CORS_ORIGINS` env változót az új doménnel.
+### Vercel deploy build fail
+- **`Error: Cannot find module 'ajv/dist/compile/codegen'`** vagy hasonló: nézd meg hogy a `vercel.json` `frontend` service-ben `installCommand: yarn install --frozen-lockfile` be van-e írva
+- **`Command "npm install" exited with 1`**: ugyanaz — a repóban van `.npmrc` `legacy-peer-deps=true`-val, ez fedi
