@@ -247,39 +247,6 @@ async def login(input: LoginInput, response: Response):
     return {**public_user(user), "access_token": token}
 
 
-@api_router.post("/auth/google/session")
-async def google_session(request: Request, response: Response):
-    session_id = request.headers.get("X-Session-ID")
-    if not session_id:
-        raise HTTPException(status_code=400, detail="Hiányzó session_id")
-    async with httpx.AsyncClient(timeout=20) as hc:
-        r = await hc.get("https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-                         headers={"X-Session-ID": session_id})
-    if r.status_code != 200:
-        raise HTTPException(status_code=401, detail="Google hitelesítés sikertelen")
-    data = r.json()
-    email = data["email"].lower()
-    user = await db.users.find_one({"email": email})
-    if not user:
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        user = {"user_id": user_id, "email": email, "name": data.get("name", ""),
-                "picture": data.get("picture", ""), "auth_provider": "google",
-                "created_at": datetime.now(timezone.utc).isoformat()}
-        await db.users.insert_one(dict(user))
-        await ensure_bankrolls(user_id)
-    else:
-        user_id = user["user_id"]
-        await db.users.update_one({"user_id": user_id},
-                                  {"$set": {"picture": data.get("picture", ""), "name": data.get("name", user.get("name", ""))}})
-    session_token = data["session_token"]
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    await db.user_sessions.insert_one({"user_id": user_id, "session_token": session_token,
-                                       "expires_at": expires_at.isoformat(),
-                                       "created_at": datetime.now(timezone.utc).isoformat()})
-    set_auth_cookie(response, "session_token", session_token, 604800)
-    return {**public_user(user), "access_token": session_token}
-
-
 @api_router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return public_user(user)
@@ -896,7 +863,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=[o.strip() for o in os.environ.get('CORS_ORIGINS', '*').split(',')],
-    allow_origin_regex=r"https://([a-z0-9-]+\.)*(web\.app|firebaseapp\.com|netlify\.app|emergent\.host|emergentagent\.com|app\.github\.dev)",
+    allow_origin_regex=r"https://([a-z0-9-]+\.)*(web\.app|firebaseapp\.com|netlify\.app|vercel\.app)",
     allow_methods=["*"],
     allow_headers=["*"],
 )

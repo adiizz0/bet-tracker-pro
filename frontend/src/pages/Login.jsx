@@ -39,12 +39,6 @@ export default function Login() {
     }
   };
 
-  const googleLogin = () => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    const redirectUrl = window.location.origin + "/";
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-  };
-
   return (
     <div className="min-h-screen relative flex items-center justify-center px-4 overflow-hidden">
       <div className="absolute inset-0 z-0">
@@ -128,19 +122,9 @@ export default function Login() {
 
           <div className="flex items-center gap-3 my-6">
             <div className="flex-1 h-px bg-white/10" />
-            <span className="text-xs text-zinc-500 uppercase tracking-wider">vagy</span>
+            <span className="text-xs text-zinc-500 uppercase tracking-wider">Bet Tracker Pro</span>
             <div className="flex-1 h-px bg-white/10" />
           </div>
-
-          <Button
-            onClick={googleLogin}
-            data-testid="google-login-button"
-            variant="outline"
-            className="w-full bg-white/5 border-white/10 text-white hover:bg-white/10 rounded-full h-11 transition-colors"
-          >
-            <img src="https://www.google.com/favicon.ico" alt="" className="w-4 h-4 mr-2" />
-            Belépés Google-lel
-          </Button>
 
           <p className="text-center text-sm text-zinc-400 mt-6">
             {mode === "login" ? "Még nincs fiókod?" : "Van már fiókod?"}{" "}
