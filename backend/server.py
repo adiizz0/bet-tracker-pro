@@ -23,16 +23,27 @@ import httpx
 import requests
 
 # ---------------- Config ----------------
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-JWT_SECRET = os.environ['JWT_SECRET']
+# Robust env-var loading: safe defaults where possible, clear runtime error otherwise.
+# Vercel serverless imports this module before every cold-start; a KeyError here
+# would break every /api/* endpoint (root cause of the 2026-01 production outage).
+MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+DB_NAME = os.environ.get('DB_NAME', 'bettracker')
+JWT_SECRET = os.environ.get('JWT_SECRET') or 'CHANGE_ME_INSECURE_DEFAULT_SET_JWT_SECRET_ENV_VAR'
 JWT_ALGORITHM = "HS256"
 COOKIE_SECURE = os.environ.get('COOKIE_SECURE', 'true').lower() == 'true'
-COOKIE_SAMESITE = os.environ.get('COOKIE_SAMESITE', 'none').lower()
+COOKIE_SAMESITE = os.environ.get('COOKIE_SAMESITE', 'lax').lower()
 ODDS_API_KEY = os.environ.get('ODDS_API_KEY', '')
 ODDS_API_BASE = os.environ.get('ODDS_API_BASE', 'https://api.the-odds-api.com/v4')
+
+# Google OAuth 2.0 (only active when both env vars are set)
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
 
 # ---------------- Reports store in DB (per account) ----------------
 APP_NAME = "bettrackerpro"
@@ -260,6 +271,119 @@ async def logout(request: Request, response: Response):
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("session_token", path="/")
     return {"ok": True}
+
+
+# ---------------- Google OAuth 2.0 ----------------
+# REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+def _google_configured() -> bool:
+    return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
+
+def _sign_oauth_state(payload: dict) -> str:
+    payload = {**payload, "exp": datetime.now(timezone.utc) + timedelta(minutes=10), "type": "oauth_state"}
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _verify_oauth_state(token: str) -> dict:
+    data = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    if data.get("type") != "oauth_state":
+        raise jwt.InvalidTokenError("bad type")
+    return data
+
+
+def _build_google_redirect_uri(request: Request) -> str:
+    return f"{str(request.base_url).rstrip('/')}/api/auth/google/callback"
+
+
+@api_router.get("/auth/google/config")
+async def google_config():
+    return {"enabled": _google_configured()}
+
+
+@api_router.get("/auth/google/login")
+async def google_login(request: Request):
+    if not _google_configured():
+        raise HTTPException(status_code=503, detail="Google bejelentkezés nincs konfigurálva")
+    from urllib.parse import urlencode
+    redirect_uri = _build_google_redirect_uri(request)
+    state = _sign_oauth_state({"nonce": uuid.uuid4().hex, "redirect_uri": redirect_uri})
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "online",
+        "prompt": "select_account",
+        "state": state,
+    }
+    return {"url": f"{GOOGLE_AUTH_URL}?{urlencode(params)}"}
+
+
+@api_router.get("/auth/google/callback")
+async def google_callback(request: Request, code: str = Query(...), state: str = Query(...)):
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    origin = str(request.base_url).rstrip("/")
+    if not _google_configured():
+        return RedirectResponse(url=f"{origin}/belepes?error=google_disabled", status_code=302)
+    try:
+        state_data = _verify_oauth_state(state)
+    except Exception:
+        return RedirectResponse(url=f"{origin}/belepes?error=invalid_state", status_code=302)
+
+    redirect_uri = state_data.get("redirect_uri") or _build_google_redirect_uri(request)
+    try:
+        async with httpx.AsyncClient(timeout=15) as hc:
+            token_resp = await hc.post(GOOGLE_TOKEN_URL, data={
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            })
+            if token_resp.status_code != 200:
+                logger.warning("Google token exchange failed: %s", token_resp.text[:200])
+                return RedirectResponse(url=f"{origin}/belepes?error=google_token", status_code=302)
+            access_token = token_resp.json().get("access_token")
+            user_resp = await hc.get(GOOGLE_USERINFO_URL,
+                                     headers={"Authorization": f"Bearer {access_token}"})
+            if user_resp.status_code != 200:
+                logger.warning("Google userinfo failed: %s", user_resp.text[:200])
+                return RedirectResponse(url=f"{origin}/belepes?error=google_userinfo", status_code=302)
+            info = user_resp.json()
+    except httpx.HTTPError as e:
+        logger.warning("Google OAuth network error: %s", e)
+        return RedirectResponse(url=f"{origin}/belepes?error=google_network", status_code=302)
+
+    email = (info.get("email") or "").lower()
+    if not email:
+        return RedirectResponse(url=f"{origin}/belepes?error=google_no_email", status_code=302)
+
+    user = await db.users.find_one({"email": email})
+    if not user:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        user = {"user_id": user_id, "email": email,
+                "name": info.get("name", ""), "picture": info.get("picture", ""),
+                "auth_provider": "google",
+                "created_at": datetime.now(timezone.utc).isoformat()}
+        await db.users.insert_one(dict(user))
+        await ensure_bankrolls(user_id)
+    else:
+        user_id = user["user_id"]
+        await db.users.update_one({"user_id": user_id}, {"$set": {
+            "picture": info.get("picture", user.get("picture", "")),
+            "name": info.get("name", user.get("name", "")),
+        }})
+
+    jwt_token = create_access_token(user_id, email)
+    redirect = RedirectResponse(url=f"{origin}/?google_token={quote(jwt_token)}", status_code=302)
+    redirect.set_cookie(key="access_token", value=jwt_token, httponly=True,
+                        secure=COOKIE_SECURE, samesite=COOKIE_SAMESITE,
+                        max_age=604800, path="/")
+    return redirect
+
+
 
 
 # ---------------- Settings routes ----------------

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { api, formatApiErrorDetail, setAuthToken } from "@/lib/api";
@@ -18,8 +18,34 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleAvailable, setGoogleAvailable] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const { setUser } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Ask backend whether Google OAuth is configured; hide the button if not.
+    api.get("/auth/google/config")
+      .then((r) => setGoogleAvailable(Boolean(r.data?.enabled)))
+      .catch(() => setGoogleAvailable(false));
+
+    // Surface any redirect-error from a failed Google flow
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get("error");
+    if (err) {
+      const map = {
+        google_disabled: "Google bejelentkezés nincs bekapcsolva a szerveren.",
+        invalid_state: "Google bejelentkezés érvénytelen — kérlek próbáld újra.",
+        google_token: "Google token csere sikertelen.",
+        google_userinfo: "Google adatok lekérése sikertelen.",
+        google_network: "Google hálózati hiba.",
+        google_no_email: "A Google fiókban nincs email cím.",
+      };
+      toast.error(map[err] || `Bejelentkezési hiba: ${err}`);
+      // Remove the error param so it doesn't reshow on refresh
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -36,6 +62,19 @@ export default function Login() {
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const googleLogin = async () => {
+    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+    setGoogleLoading(true);
+    try {
+      const { data } = await api.get("/auth/google/login");
+      if (data?.url) window.location.href = data.url;
+      else throw new Error("Nincs Google auth URL");
+    } catch (err) {
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Google bejelentkezés indítása sikertelen");
+      setGoogleLoading(false);
     }
   };
 
@@ -120,11 +159,33 @@ export default function Login() {
             </Button>
           </form>
 
-          <div className="flex items-center gap-3 my-6">
-            <div className="flex-1 h-px bg-white/10" />
-            <span className="text-xs text-zinc-500 uppercase tracking-wider">Bet Tracker Pro</span>
-            <div className="flex-1 h-px bg-white/10" />
-          </div>
+          {googleAvailable && (
+            <>
+              <div className="flex items-center gap-3 my-6">
+                <div className="flex-1 h-px bg-white/10" />
+                <span className="text-xs text-zinc-500 uppercase tracking-wider">vagy</span>
+                <div className="flex-1 h-px bg-white/10" />
+              </div>
+
+              <Button
+                type="button"
+                onClick={googleLogin}
+                disabled={googleLoading}
+                data-testid="google-login-button"
+                variant="outline"
+                className="w-full bg-white/5 border-white/10 text-white hover:bg-white/10 rounded-full h-11 transition-colors"
+              >
+                {googleLoading ? (
+                  <Loader2 className="animate-spin" size={18} />
+                ) : (
+                  <>
+                    <img src="https://www.google.com/favicon.ico" alt="" className="w-4 h-4 mr-2" />
+                    Belépés Google-lel
+                  </>
+                )}
+              </Button>
+            </>
+          )}
 
           <p className="text-center text-sm text-zinc-400 mt-6">
             {mode === "login" ? "Még nincs fiókod?" : "Van már fiókod?"}{" "}

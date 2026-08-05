@@ -1,11 +1,16 @@
 import React, { useEffect, useRef } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { api, setAuthToken } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
+/**
+ * Handles the redirect back from Google OAuth (backend redirects to /?google_token=<jwt>).
+ * Extracts the token, stores it in localStorage, cleans the URL, and refreshes
+ * the auth context by calling /auth/me.
+ */
 export default function AuthCallback() {
-  const location = useLocation();
   const navigate = useNavigate();
   const { setUser } = useAuth();
   const hasProcessed = useRef(false);
@@ -14,27 +19,27 @@ export default function AuthCallback() {
     if (hasProcessed.current) return;
     hasProcessed.current = true;
 
-    const hash = location.hash || window.location.hash;
-    const sessionId = new URLSearchParams(hash.replace("#", "")).get("session_id");
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("google_token");
+    if (!token) {
+      navigate("/belepes", { replace: true });
+      return;
+    }
+    setAuthToken(token);
+    // Immediately clean URL so refresh doesn't retry
+    window.history.replaceState(null, "", window.location.pathname);
 
-    const run = async () => {
-      try {
-        const { data } = await api.post(
-          "/auth/google/session",
-          {},
-          { headers: { "X-Session-ID": sessionId } }
-        );
-        setAuthToken(data.access_token);
+    api.get("/auth/me")
+      .then(({ data }) => {
         setUser(data);
-        window.history.replaceState(null, "", window.location.pathname);
+        toast.success("Sikeres belépés Google-lel");
         navigate("/", { replace: true });
-      } catch (e) {
+      })
+      .catch(() => {
+        toast.error("Bejelentkezés sikertelen");
         navigate("/belepes", { replace: true });
-      }
-    };
-    if (sessionId) run();
-    else navigate("/belepes", { replace: true });
-  }, [location, navigate, setUser]);
+      });
+  }, [navigate, setUser]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#050505]">

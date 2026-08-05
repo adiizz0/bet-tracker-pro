@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 6 auth-hardening validation. Backend: 38/38 pytest passed (9 new in test_iter6 + 29 existing regression). Verified: (1) server.py imports cleanly with NO env vars set (subprocess test) — this is the exact production-outage regression fix; (2) email register creates user + default bankroll + sets access_token cookie + returns JWT; (3) admin login (admin@bettracker.pro/admin123) works; (4) /api/auth/me works via cookie AND Bearer token; (5) logout returns {ok:true} and subsequent /me→401; (6) protected routes (/bankrolls, /settings, /bets) return 401 without auth; (7) /api/auth/google/config returns {enabled:false} locally; (8) /api/auth/google/login returns 503 when not configured. Frontend UI: login form works, redirects to dashboard with 'Sikeres belépés' toast, all API calls 200, token stored in localStorage as 'bt_auth_token', session persists across page refresh, logout clears token and returns to /belepes. Google button correctly hidden (0 Google buttons rendered) because config.enabled=false.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter6_auth_hardening.py",
+    "/app/backend/tests/test_bettracker.py",
+    "/app/test_reports/pytest/iter6.xml"
+  ],
+  "action_items": [
+    "USER ACTION (Vercel): set DB_NAME, MONGO_URL (Atlas), JWT_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD env vars. Optionally GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET to enable Google OAuth. Redeploy."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1021 lines — recommend splitting into routers (auth, bankrolls, bets, analytics, odds, reports) for maintainability.",
+    "JWT_SECRET falls back to 'CHANGE_ME_INSECURE_DEFAULT_...' — good for import safety, but consider logging a WARNING at startup if the fallback is in use so it's visible in Vercel logs.",
+    "COOKIE_SECURE defaults to true — correct for prod but locally requires HTTPS; local .env already sets false, so OK.",
+    "Google callback issues JWT via query string (?google_token=<jwt>) — acceptable for OAuth redirect but consider using a short-lived one-time code exchanged via POST to avoid JWT being written to browser history / referrer headers."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter6_auth_hardening.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@bettracker.pro / admin123 (seeded via ADMIN_EMAIL/ADMIN_PASSWORD env)",
+  "seed_data_creation": "None (test_iter6 creates ephemeral users via /auth/register with TEST-prefixed uuid emails).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All auth flows (email register/login/me/logout, session persist, protected route gating) verified end-to-end on preview. Google OAuth gracefully disabled locally. Local server.py hardened against missing env vars — subprocess import test confirms no crash. Production (Vercel) still requires user to set env vars — cannot verify remotely. LocalStorage key for JWT is 'bt_auth_token' (not 'access_token' or 'token')."
+}

@@ -43,7 +43,7 @@ function OnboardingGate({ children }) {
 
 function AppRouter() {
   const location = useLocation();
-  if (location.hash?.includes("session_id=")) {
+  if (location.search?.includes("google_token=")) {
     return <AuthCallback />;
   }
   return (
