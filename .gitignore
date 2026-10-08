@@ -102,3 +102,7 @@ credentials.json
 *.key
 .credentials
 frontend/node_modules/.cache/default-development/2.pack
+
+# keep the credential-free templates tracked
+!.env.example
+!backend/.env.example
