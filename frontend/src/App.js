@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { useQuery } from "@tanstack/react-query";
 import "@/App.css";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { LanguageProvider } from "@/context/LanguageContext";
 import { api } from "@/lib/api";
 import { Toaster } from "@/components/ui/sonner";
 import AuthCallback from "@/components/AuthCallback";
@@ -78,12 +79,14 @@ function AppRouter() {
 function App() {
   return (
     <div className="App">
-      <AuthProvider>
-        <BrowserRouter>
-          <AppRouter />
-        </BrowserRouter>
-        <Toaster position="bottom-right" theme="dark" richColors />
-      </AuthProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <AppRouter />
+          </BrowserRouter>
+          <Toaster position="bottom-right" theme="dark" richColors />
+        </AuthProvider>
+      </LanguageProvider>
     </div>
   );
 }

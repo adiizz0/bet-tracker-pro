@@ -21,7 +21,7 @@ services:
     build: ./backend
     container_name: btp-backend
     restart: unless-stopped
-    command: uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+    command: python -m uvicorn server:app --host 0.0.0.0 --port 8001 --reload
     working_dir: /app
     volumes:
       - ./backend:/app

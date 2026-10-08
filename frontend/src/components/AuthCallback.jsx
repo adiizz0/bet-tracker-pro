@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, setAuthToken } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useLanguage } from "@/context/LanguageContext";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -13,6 +14,7 @@ import { toast } from "sonner";
 export default function AuthCallback() {
   const navigate = useNavigate();
   const { setUser } = useAuth();
+  const { t } = useLanguage();
   const hasProcessed = useRef(false);
 
   useEffect(() => {
@@ -32,20 +34,20 @@ export default function AuthCallback() {
     api.get("/auth/me")
       .then(({ data }) => {
         setUser(data);
-        toast.success("Sikeres belépés Google-lel");
+        toast.success(t("googleLoginSuccess"));
         navigate("/", { replace: true });
       })
       .catch(() => {
-        toast.error("Bejelentkezés sikertelen");
+        toast.error(t("loginFailed"));
         navigate("/belepes", { replace: true });
       });
-  }, [navigate, setUser]);
+  }, [navigate, setUser, t]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#050505]">
       <div className="flex flex-col items-center gap-4 text-white">
         <Loader2 className="animate-spin" size={32} />
-        <p className="text-sm text-zinc-400 font-mono-data">Bejelentkezés folyamatban…</p>
+        <p className="text-sm text-zinc-400 font-mono-data">{t("loginInProgress")}</p>
       </div>
     </div>
   );

@@ -2,7 +2,9 @@ import React, { useState } from "react";
 import { NavLink, useNavigate, Outlet } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
+import { useLanguage } from "@/context/LanguageContext";
 import BankrollSwitcher from "@/components/BankrollSwitcher";
+import LanguageSelector from "@/components/LanguageSelector";
 import {
   LayoutDashboard,
   ListChecks,
@@ -14,17 +16,10 @@ import {
   X,
 } from "lucide-react";
 
-const NAV = [
-  { to: "/", label: "Vezérlőpult", icon: LayoutDashboard, end: true, id: "dashboard" },
-  { to: "/fogadasok", label: "Fogadások", icon: ListChecks, id: "bets" },
-  { to: "/elemzes", label: "Elemzés", icon: BarChart3, id: "analytics" },
-  { to: "/beallitasok", label: "Beállítások", icon: SettingsIcon, id: "settings" },
-];
-
-function NavItems({ onNavigate }) {
+function NavItems({ onNavigate, nav }) {
   return (
     <>
-      {NAV.map((n) => {
+      {nav.map((n) => {
         const Icon = n.icon;
         return (
           <NavLink
@@ -52,8 +47,15 @@ function NavItems({ onNavigate }) {
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const NAV = [
+    { to: "/", label: t("dashboard"), icon: LayoutDashboard, end: true, id: "dashboard" },
+    { to: "/fogadasok", label: t("bets"), icon: ListChecks, id: "bets" },
+    { to: "/elemzes", label: t("analytics"), icon: BarChart3, id: "analytics" },
+    { to: "/beallitasok", label: t("settings"), icon: SettingsIcon, id: "settings" },
+  ];
 
   const handleLogout = async () => {
     await logout();
@@ -74,8 +76,11 @@ export default function Layout() {
           </div>
         </div>
         <BankrollSwitcher />
+        <div className="mb-4">
+          <LanguageSelector />
+        </div>
         <nav className="flex flex-col gap-1 flex-1">
-          <NavItems />
+          <NavItems nav={NAV} />
         </nav>
         <div className="border-t border-white/[0.06] pt-4">
           <div className="flex items-center gap-3 px-2 mb-3">
@@ -87,7 +92,7 @@ export default function Layout() {
               )}
             </div>
             <div className="min-w-0">
-              <div className="text-sm text-white truncate">{user?.name || "Felhasználó"}</div>
+              <div className="text-sm text-white truncate">{user?.name || t("user")}</div>
               <div className="text-[11px] text-zinc-500 truncate">{user?.email}</div>
             </div>
           </div>
@@ -97,7 +102,7 @@ export default function Layout() {
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-zinc-400 hover:text-loss hover:bg-white/[0.03] transition-colors duration-200"
           >
             <LogOut size={18} />
-            Kijelentkezés
+            {t("logout")}
           </button>
         </div>
       </aside>
@@ -137,21 +142,24 @@ export default function Layout() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-8">
-                <span className="font-head font-bold text-white">Menü</span>
+                <span className="font-head font-bold text-white">{t("menu")}</span>
                 <button onClick={() => setMobileOpen(false)} className="text-zinc-400 p-1">
                   <X size={20} />
                 </button>
               </div>
               <BankrollSwitcher />
+              <div className="my-4">
+                <LanguageSelector />
+              </div>
               <nav className="flex flex-col gap-1 flex-1">
-                <NavItems onNavigate={() => setMobileOpen(false)} />
+                <NavItems nav={NAV} onNavigate={() => setMobileOpen(false)} />
               </nav>
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-zinc-400 hover:text-loss transition-colors"
               >
                 <LogOut size={18} />
-                Kijelentkezés
+                {t("logout")}
               </button>
             </motion.aside>
           </motion.div>

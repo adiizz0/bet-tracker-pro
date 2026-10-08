@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
+import { useLanguage } from "@/context/LanguageContext";
 import { CURRENCIES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,21 +28,21 @@ function Card({ title, icon: Icon, iconColor, children, delay }) {
   );
 }
 
-const fields = [
-  { key: "starting_bankroll", label: "Kezdő bankroll", card: "bankroll" },
-  { key: "unit_size", label: "Tétegység (unit)", card: "bankroll" },
-  { key: "profit_goal", label: "Profit cél", card: "goal" },
-  { key: "daily_limit", label: "Napi tét-limit", card: "limit" },
-  { key: "weekly_limit", label: "Heti tét-limit", card: "limit" },
-];
-
 export default function Settings() {
   const qc = useQueryClient();
+  const { t } = useLanguage();
   const { data: settings } = useQuery({
     queryKey: ["settings"],
     queryFn: async () => (await api.get("/settings")).data,
   });
   const [form, setForm] = useState(null);
+  const fields = [
+    { key: "starting_bankroll", label: t("startBankroll"), card: "bankroll" },
+    { key: "unit_size", label: t("unitSize"), card: "bankroll" },
+    { key: "profit_goal", label: t("profitGoal"), card: "goal" },
+    { key: "daily_limit", label: t("dailyLimit"), card: "limit" },
+    { key: "weekly_limit", label: t("weeklyLimit"), card: "limit" },
+  ];
 
   useEffect(() => {
     if (settings && !form) setForm(settings);
@@ -51,12 +52,12 @@ export default function Settings() {
     mutationFn: (data) => api.put("/settings", data),
     onSuccess: () => {
       qc.invalidateQueries();
-      toast.success("Beállítások mentve");
+      toast.success(t("settingsSaved"));
     },
-    onError: () => toast.error("Hiba a mentés során"),
+    onError: () => toast.error(t("saveFailed")),
   });
 
-  if (!form) return <div className="text-zinc-500">Betöltés…</div>;
+  if (!form) return <div className="text-zinc-500">{t("loading")}</div>;
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -88,16 +89,16 @@ export default function Settings() {
   return (
     <div className="max-w-3xl">
       <div className="mb-8">
-        <h1 className="font-head text-4xl sm:text-5xl font-light tracking-tighter text-white">Beállítások</h1>
-        <p className="text-sm text-zinc-500 mt-1">Bankroll, célok és felelős fogadási limitek</p>
+        <h1 className="font-head text-4xl sm:text-5xl font-light tracking-tighter text-white">{t("settings")}</h1>
+        <p className="text-sm text-zinc-500 mt-1">{t("settingsSubtitle")}</p>
       </div>
 
       <div className="space-y-6">
-        <Card title="Tőke" icon={Wallet} iconColor="#00E676" delay={0}>
+        <Card title={t("capital")} icon={Wallet} iconColor="#00E676" delay={0}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {fields.filter((f) => f.card === "bankroll").map(renderField)}
             <div>
-              <Label className="text-xs text-zinc-500">Pénznem</Label>
+              <Label className="text-xs text-zinc-500">{t("currencyLabel")}</Label>
               <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
                 <SelectTrigger data-testid="settings-currency" className="mt-1.5 bg-white/5 border-white/10 text-white">
                   <SelectValue />
@@ -110,15 +111,15 @@ export default function Settings() {
           </div>
         </Card>
 
-        <Card title="Cél" icon={Target} iconColor="#00E676" delay={0.1}>
+        <Card title={t("profitGoalCard")} icon={Target} iconColor="#00E676" delay={0.1}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {fields.filter((f) => f.card === "goal").map(renderField)}
           </div>
         </Card>
 
-        <Card title="Felelős fogadás" icon={ShieldAlert} iconColor="#FFCC00" delay={0.2}>
+        <Card title={t("responsibleGambling")} icon={ShieldAlert} iconColor="#FFCC00" delay={0.2}>
           <p className="text-sm text-zinc-500 mb-4">
-            Figyelmeztetést kapsz, ha túlléped a beállított tét-limiteket. 0 = nincs limit.
+            {t("responsibleDescription")}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {fields.filter((f) => f.card === "limit").map(renderField)}
@@ -131,7 +132,7 @@ export default function Settings() {
           data-testid="settings-save-button"
           className="bg-white text-black hover:bg-zinc-200 rounded-full h-11 px-8 font-semibold active:scale-95 transition-colors"
         >
-          {mutation.isPending ? <Loader2 className="animate-spin" size={18} /> : "Mentés"}
+          {mutation.isPending ? <Loader2 className="animate-spin" size={18} /> : t("save")}
         </Button>
       </div>
     </div>

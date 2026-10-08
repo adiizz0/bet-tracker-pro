@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, formatApiErrorDetail } from "@/lib/api";
+import { useLanguage } from "@/context/LanguageContext";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ const empty = {
 
 export default function BetFormDialog({ open, onOpenChange, editBet, prefill }) {
   const qc = useQueryClient();
+  const { t } = useLanguage();
   const [form, setForm] = useState(empty);
 
   useEffect(() => {
@@ -69,14 +71,14 @@ export default function BetFormDialog({ open, onOpenChange, editBet, prefill }) 
     },
     onSuccess: async () => {
       qc.invalidateQueries();
-      toast.success(editBet ? "Fogadás frissítve" : "Fogadás rögzítve");
+      toast.success(editBet ? t("betUpdated") : t("betSaved"));
       onOpenChange(false);
       try {
         const { data } = await api.get("/limits/status");
-        if (data.daily_exceeded) toast.warning("Túllépted a napi tét-limitedet!");
-        else if (data.weekly_exceeded) toast.warning("Túllépted a heti tét-limitedet!");
-        else if (data.daily_near) toast.warning(`Közelítesz a napi tét-limitedhez (${data.daily_pct}%)`);
-        else if (data.weekly_near) toast.warning(`Közelítesz a heti tét-limitedhez (${data.weekly_pct}%)`);
+        if (data.daily_exceeded) toast.warning(t("dailyLimitExceeded"));
+        else if (data.weekly_exceeded) toast.warning(t("weeklyLimitExceeded"));
+        else if (data.daily_near) toast.warning(`${t("dailyLimitNear")} (${data.daily_pct}%)`);
+        else if (data.weekly_near) toast.warning(`${t("weeklyLimitNear")} (${data.weekly_pct}%)`);
       } catch (e) {}
     },
     onError: (e) => toast.error(formatApiErrorDetail(e.response?.data?.detail)),
@@ -87,11 +89,11 @@ export default function BetFormDialog({ open, onOpenChange, editBet, prefill }) 
     const stakeNum = parseDecimal(form.stake);
     const oddsNum = parseDecimal(form.odds);
     if (!form.stake || !form.odds || !Number.isFinite(stakeNum) || !Number.isFinite(oddsNum)) {
-      toast.error("Adj meg érvényes tétet és oddsot (pl. 1000 és 1.55)");
+      toast.error(t("validationRequired"));
       return;
     }
     if (stakeNum <= 0 || oddsNum < 1) {
-      toast.error("A tét legyen 0-nál nagyobb, az odds legalább 1.00");
+      toast.error(t("validationStake"));
       return;
     }
     mutation.mutate(form);
@@ -102,52 +104,52 @@ export default function BetFormDialog({ open, onOpenChange, editBet, prefill }) 
       <DialogContent className="bg-[#0A0A0A] border-white/10 text-white max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-head text-2xl font-light tracking-tight">
-            {editBet ? "Fogadás szerkesztése" : "Új fogadás"}
+            {editBet ? t("editBet") : t("newBet")}
           </DialogTitle>
           <DialogDescription className="text-zinc-500 text-sm">
-            Add meg a fogadás részleteit. A profit automatikusan számolódik az eredmény alapján.
+            {t("addBetDetails")}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4 mt-2">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label className="text-xs text-zinc-500">Sport</Label>
+              <Label className="text-xs text-zinc-500">{t("sport")}</Label>
               <Select value={form.sport} onValueChange={(v) => set("sport", v)}>
                 <SelectTrigger data-testid="bet-sport-select" className="mt-1.5 bg-white/5 border-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-[#0A0A0A] border-white/10 text-white">
-                  {SPORTS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  {SPORTS.map((s) => <SelectItem key={s} value={s}>{t(s)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label className="text-xs text-zinc-500">Piac</Label>
+              <Label className="text-xs text-zinc-500">{t("market")}</Label>
               <Select value={form.market} onValueChange={(v) => set("market", v)}>
                 <SelectTrigger className="mt-1.5 bg-white/5 border-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-[#0A0A0A] border-white/10 text-white">
-                  {MARKETS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                  {MARKETS.map((m) => <SelectItem key={m} value={m}>{t(m)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           </div>
 
           <div>
-            <Label className="text-xs text-zinc-500">Tipp / esemény</Label>
+            <Label className="text-xs text-zinc-500">{t("betDetails")}</Label>
             <Input
               data-testid="bet-selection-input"
               value={form.selection}
               onChange={(e) => set("selection", e.target.value)}
-              placeholder="pl. Arsenal – Chelsea, Hazai győzelem"
+              placeholder={t("selectionExample")}
               className="mt-1.5 bg-white/5 border-white/10 text-white"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label className="text-xs text-zinc-500">Tét</Label>
+              <Label className="text-xs text-zinc-500">{t("stake")}</Label>
               <Input
                 data-testid="bet-stake-input"
                 type="text"
@@ -159,14 +161,14 @@ export default function BetFormDialog({ open, onOpenChange, editBet, prefill }) 
               />
             </div>
             <div>
-              <Label className="text-xs text-zinc-500">Odds</Label>
+              <Label className="text-xs text-zinc-500">{t("odds")}</Label>
               <Input
                 data-testid="bet-odds-input"
                 type="text"
                 inputMode="decimal"
                 value={form.odds}
                 onChange={(e) => set("odds", e.target.value)}
-                placeholder="1.95 vagy 1,95"
+                placeholder={t("oddsExample")}
                 className="mt-1.5 bg-white/5 border-white/10 text-white font-mono-data"
               />
             </div>
@@ -174,29 +176,29 @@ export default function BetFormDialog({ open, onOpenChange, editBet, prefill }) 
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label className="text-xs text-zinc-500">Eredmény</Label>
+              <Label className="text-xs text-zinc-500">{t("result")}</Label>
               <Select value={form.result} onValueChange={(v) => set("result", v)}>
                 <SelectTrigger data-testid="bet-result-select" className="mt-1.5 bg-white/5 border-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-[#0A0A0A] border-white/10 text-white">
-                  {RESULTS.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                  {RESULTS.map((r) => <SelectItem key={r.value} value={r.value}>{t(r.label)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label className="text-xs text-zinc-500">Fogadóiroda</Label>
+              <Label className="text-xs text-zinc-500">{t("bookmaker")}</Label>
               <Input
                 value={form.bookmaker}
                 onChange={(e) => set("bookmaker", e.target.value)}
-                placeholder="pl. Bet365"
+                placeholder={t("bookmakerExample")}
                 className="mt-1.5 bg-white/5 border-white/10 text-white"
               />
             </div>
           </div>
 
           <div>
-            <Label className="text-xs text-zinc-500">Dátum</Label>
+            <Label className="text-xs text-zinc-500">{t("date")}</Label>
             <Input
               type="datetime-local"
               value={form.date}
@@ -206,11 +208,11 @@ export default function BetFormDialog({ open, onOpenChange, editBet, prefill }) 
           </div>
 
           <div>
-            <Label className="text-xs text-zinc-500">Jegyzet</Label>
+            <Label className="text-xs text-zinc-500">{t("note")}</Label>
             <Textarea
               value={form.note}
               onChange={(e) => set("note", e.target.value)}
-              placeholder="Opcionális jegyzet…"
+              placeholder={t("optionalNote")}
               className="mt-1.5 bg-white/5 border-white/10 text-white resize-none"
               rows={2}
             />
@@ -222,7 +224,7 @@ export default function BetFormDialog({ open, onOpenChange, editBet, prefill }) 
             data-testid="bet-form-submit-button"
             className="w-full bg-[#00E676] text-black hover:bg-[#00c765] rounded-full h-11 font-semibold active:scale-95 transition-colors"
           >
-            {mutation.isPending ? <Loader2 className="animate-spin" size={18} /> : editBet ? "Mentés" : "Rögzítés"}
+            {mutation.isPending ? <Loader2 className="animate-spin" size={18} /> : editBet ? t("save") : t("saveBet")}
           </Button>
         </form>
       </DialogContent>

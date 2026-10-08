@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
+import { useLanguage } from "@/context/LanguageContext";
 import { KpiCard, fmtMoney, fmtPct } from "@/components/KpiCard";
 import {
   ResponsiveContainer,
@@ -22,12 +23,12 @@ import {
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
-function ChartTooltip({ active, payload, currency }) {
+function ChartTooltip({ active, payload, currency, locale }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="glass rounded-lg px-3 py-2 text-xs">
       <div className="text-zinc-400 mb-1 font-mono-data">
-        {new Date(payload[0].payload.date).toLocaleDateString("hu-HU")}
+        {new Date(payload[0].payload.date).toLocaleDateString(locale)}
       </div>
       <div className="text-white font-mono-data font-semibold">
         {fmtMoney(payload[0].value, currency)}
@@ -37,6 +38,7 @@ function ChartTooltip({ active, payload, currency }) {
 }
 
 export default function Dashboard() {
+  const { t, locale } = useLanguage();
   const { data: a, isLoading } = useQuery({
     queryKey: ["analytics"],
     queryFn: async () => (await api.get("/analytics")).data,
@@ -51,7 +53,7 @@ export default function Dashboard() {
   });
 
   if (isLoading || !a) {
-    return <div className="text-zinc-500">Betöltés…</div>;
+    return <div className="text-zinc-500">{t("loading")}</div>;
   }
 
   const k = a.kpis;
@@ -71,11 +73,11 @@ export default function Dashboard() {
     <div>
       <div className="flex items-end justify-between mb-8 flex-wrap gap-3">
         <div>
-          <h1 className="font-head text-4xl sm:text-5xl font-light tracking-tighter text-white">Vezérlőpult</h1>
-          <p className="text-sm text-zinc-500 mt-1">Valós idejű bankroll áttekintés</p>
+          <h1 className="font-head text-4xl sm:text-5xl font-light tracking-tighter text-white">{t("dashboard")}</h1>
+          <p className="text-sm text-zinc-500 mt-1">{t("realTimeOverview")}</p>
         </div>
         <div className="text-right">
-          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Aktuális bankroll</div>
+          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">{t("currentBankroll")}</div>
           <div className="font-head text-3xl font-bold tracking-tighter text-white font-mono-data">
             {fmtMoney(k.current_bankroll, currency)}
           </div>
@@ -97,49 +99,49 @@ export default function Dashboard() {
           />
           <span className={`text-sm ${limits.daily_exceeded || limits.weekly_exceeded ? "text-loss" : "text-[#FFCC00]"}`}>
             {limits.daily_exceeded
-              ? "Túllépted a napi tét-limitedet. Fogadj felelősséggel!"
+              ? t("dailyLimitExceededMessage")
               : limits.weekly_exceeded
-              ? "Túllépted a heti tét-limitedet. Fogadj felelősséggel!"
+              ? t("weeklyLimitExceededMessage")
               : limits.daily_near
-              ? `Közelítesz a napi tét-limitedhez (${limits.daily_pct}%). Vigyázz a tétekkel!`
-              : `Közelítesz a heti tét-limitedhez (${limits.weekly_pct}%).`}
+              ? t("dailyLimitNearMessage").replace("{percent}", limits.daily_pct)
+              : t("weeklyLimitNearMessage").replace("{percent}", limits.weekly_pct)}
           </span>
         </motion.div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <KpiCard
-          label="Profit / Veszteség"
+          label={t("profitLoss")}
           value={fmtMoney(k.total_profit, currency)}
           tone={positive ? "profit" : "loss"}
           icon={TrendingUp}
-          sub={`${k.settled_bets} lezárt fogadás`}
+          sub={`${k.settled_bets} ${t("totalSettled")}`}
           delay={0}
           testId="dashboard-profit-value"
         />
         <KpiCard
-          label="ROI"
+          label={t("roi")}
           value={fmtPct(k.roi)}
           tone={k.roi >= 0 ? "profit" : "loss"}
           icon={Percent}
-          sub={`${fmtMoney(k.total_staked, currency)} megtéve`}
+          sub={`${fmtMoney(k.total_staked, currency)} ${t("amountStaked")}`}
           delay={0.1}
           testId="dashboard-roi-value"
         />
         <KpiCard
-          label="Találati arány"
+          label={t("winRate")}
           value={`${k.win_rate.toFixed(1)}%`}
           icon={Target}
-          sub={`Átlag odds ${k.avg_odds.toFixed(2)}`}
+          sub={`${t("avgOdds")} ${k.avg_odds.toFixed(2)}`}
           delay={0.2}
           testId="dashboard-winrate-value"
         />
         <KpiCard
-          label="Nyerő sorozat"
+          label={t("winningStreak")}
           value={`${k.best_win_streak}`}
           tone="profit"
           icon={Trophy}
-          sub={`Vesztő sorozat: ${k.best_lose_streak}`}
+          sub={`${t("losingStreak")}: ${k.best_lose_streak}`}
           delay={0.3}
           testId="dashboard-streak-value"
         />
@@ -156,7 +158,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
               <Wallet size={18} className="text-zinc-400" />
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400">Bankroll görbe</span>
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400">{t("bankrollCurve")}</span>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={320}>
@@ -171,7 +173,7 @@ export default function Dashboard() {
               <XAxis
                 dataKey="date"
                 tick={{ fill: "#52525B", fontSize: 11, fontFamily: "JetBrains Mono" }}
-                tickFormatter={(d) => new Date(d).toLocaleDateString("hu-HU", { month: "short", day: "numeric" })}
+                tickFormatter={(d) => new Date(d).toLocaleDateString(locale, { month: "short", day: "numeric" })}
                 axisLine={false}
                 tickLine={false}
                 minTickGap={40}
@@ -181,9 +183,9 @@ export default function Dashboard() {
                 axisLine={false}
                 tickLine={false}
                 width={70}
-                tickFormatter={(v) => new Intl.NumberFormat("hu-HU", { notation: "compact" }).format(v)}
+                tickFormatter={(v) => new Intl.NumberFormat(locale, { notation: "compact" }).format(v)}
               />
-              <Tooltip content={<ChartTooltip currency={currency} />} />
+              <Tooltip content={<ChartTooltip currency={currency} locale={locale} />} />
               <Area
                 type="monotone"
                 dataKey="bankroll"
@@ -205,7 +207,7 @@ export default function Dashboard() {
         >
           <div className="flex items-center gap-2 mb-6">
             <Target size={18} className="text-zinc-400" />
-            <span className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400">Profit cél</span>
+            <span className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400">{t("profitGoalCard")}</span>
           </div>
           {profitGoal > 0 ? (
             <>
@@ -218,7 +220,7 @@ export default function Dashboard() {
               <Progress value={Math.max(0, goalPct)} className="h-2 bg-white/10" />
             </>
           ) : (
-            <p className="text-sm text-zinc-500">Állíts be profit célt a Beállításokban.</p>
+            <p className="text-sm text-zinc-500">{t("setGoalPrompt")}</p>
           )}
 
           <div className="mt-auto pt-6 space-y-3">
@@ -227,7 +229,7 @@ export default function Dashboard() {
                 {limits.daily_limit > 0 && (
                   <div data-testid="daily-limit-bar">
                     <div className="flex justify-between text-xs mb-1.5">
-                      <span className="text-zinc-500">Napi tét-limit</span>
+                      <span className="text-zinc-500">{t("dailyStakeLimit")}</span>
                       <span className="font-mono-data text-zinc-300">
                         {fmtMoney(limits.daily_staked, currency)} / {fmtMoney(limits.daily_limit, currency)}
                       </span>
@@ -246,7 +248,7 @@ export default function Dashboard() {
                 {limits.weekly_limit > 0 && (
                   <div data-testid="weekly-limit-bar">
                     <div className="flex justify-between text-xs mb-1.5">
-                      <span className="text-zinc-500">Heti tét-limit</span>
+                      <span className="text-zinc-500">{t("weeklyStakeLimit")}</span>
                       <span className="font-mono-data text-zinc-300">
                         {fmtMoney(limits.weekly_staked, currency)} / {fmtMoney(limits.weekly_limit, currency)}
                       </span>
@@ -265,15 +267,15 @@ export default function Dashboard() {
               </div>
             )}
             <div className="flex justify-between text-sm">
-              <span className="text-zinc-500">Yield</span>
+              <span className="text-zinc-500">{t("yield")}</span>
               <span className="font-mono-data text-white">{fmtPct(k.yield)}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-zinc-500">Függő fogadások</span>
+              <span className="text-zinc-500">{t("pendingBets")}</span>
               <span className="font-mono-data text-white">{k.pending_bets}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-zinc-500">Összes fogadás</span>
+              <span className="text-zinc-500">{t("totalBets")}</span>
               <span className="font-mono-data text-white">{k.total_bets}</span>
             </div>
           </div>

@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { api, formatApiErrorDetail, setAuthToken } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
+import LanguageSelector from "@/components/LanguageSelector";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TrendingUp, Loader2 } from "lucide-react";
@@ -21,6 +23,7 @@ export default function Login() {
   const [googleAvailable, setGoogleAvailable] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const { setUser } = useAuth();
+  const { t } = useLanguage();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -34,18 +37,18 @@ export default function Login() {
     const err = params.get("error");
     if (err) {
       const map = {
-        google_disabled: "Google bejelentkezés nincs bekapcsolva a szerveren.",
-        invalid_state: "Google bejelentkezés érvénytelen — kérlek próbáld újra.",
-        google_token: "Google token csere sikertelen.",
-        google_userinfo: "Google adatok lekérése sikertelen.",
-        google_network: "Google hálózati hiba.",
-        google_no_email: "A Google fiókban nincs email cím.",
+        google_disabled: t("googleDisabled"),
+        invalid_state: t("invalidGoogleState"),
+        google_token: t("googleTokenExchangeFailed"),
+        google_userinfo: t("googleUserInfoFailed"),
+        google_network: t("googleNetworkError"),
+        google_no_email: t("googleNoEmail"),
       };
-      toast.error(map[err] || `Bejelentkezési hiba: ${err}`);
+      toast.error(map[err] || t("loginError").replace("{error}", err));
       // Remove the error param so it doesn't reshow on refresh
       window.history.replaceState(null, "", window.location.pathname);
     }
-  }, []);
+  }, [t]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -56,7 +59,7 @@ export default function Login() {
       const { data } = await api.post(endpoint, payload);
       setAuthToken(data.access_token);
       setUser(data);
-      toast.success(mode === "login" ? "Sikeres belépés" : "Fiók létrehozva");
+      toast.success(mode === "login" ? t("loginSuccess") : t("accountCreated"));
       navigate("/");
     } catch (err) {
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || err.message);
@@ -71,9 +74,9 @@ export default function Login() {
     try {
       const { data } = await api.get("/auth/google/login");
       if (data?.url) window.location.href = data.url;
-      else throw new Error("Nincs Google auth URL");
+      else throw new Error(t("googleAuthUrlMissing"));
     } catch (err) {
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Google bejelentkezés indítása sikertelen");
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || t("googleLoginStartFailed"));
       setGoogleLoading(false);
     }
   };
@@ -97,47 +100,48 @@ export default function Login() {
           </div>
           <div>
             <div className="font-head text-2xl font-bold text-white tracking-tight">Bet Tracker Pro</div>
-            <div className="text-[11px] uppercase tracking-[0.25em] text-zinc-400">Bankroll & Analitika</div>
+            <div className="text-[11px] uppercase tracking-[0.25em] text-zinc-400">{t("brandSubtitle")}</div>
           </div>
         </div>
 
         <div className="glass rounded-3xl p-8">
+          <div className="flex justify-end mb-4">
+            <LanguageSelector />
+          </div>
           <h1 className="font-head text-3xl font-light tracking-tighter text-white mb-1">
-            {mode === "login" ? "Üdv újra!" : "Fiók létrehozása"}
+            {mode === "login" ? t("welcomeBack") : t("createAccount")}
           </h1>
           <p className="text-sm text-zinc-400 mb-7">
-            {mode === "login"
-              ? "Jelentkezz be a bankrollod követéséhez."
-              : "Regisztrálj és kezdd el követni a teljesítményed."}
+            {mode === "login" ? t("loginSubtitle") : t("registerSubtitle")}
           </p>
 
           <form onSubmit={submit} className="space-y-5">
             {mode === "register" && (
               <div>
-                <Label className="text-xs uppercase tracking-wider text-zinc-500">Név</Label>
+                <Label className="text-xs uppercase tracking-wider text-zinc-500">{t("name")}</Label>
                 <Input
                   data-testid="register-name-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Neved"
+                  placeholder={t("name")}
                   className="mt-1.5 bg-transparent border-0 border-b border-white/20 rounded-none px-0 focus-visible:ring-0 focus-visible:border-white text-white"
                 />
               </div>
             )}
             <div>
-              <Label className="text-xs uppercase tracking-wider text-zinc-500">Email</Label>
+              <Label className="text-xs uppercase tracking-wider text-zinc-500">{t("email")}</Label>
               <Input
                 data-testid="login-email-input"
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="te@email.com"
+                placeholder="email@example.com"
                 className="mt-1.5 bg-transparent border-0 border-b border-white/20 rounded-none px-0 focus-visible:ring-0 focus-visible:border-white text-white"
               />
             </div>
             <div>
-              <Label className="text-xs uppercase tracking-wider text-zinc-500">Jelszó</Label>
+              <Label className="text-xs uppercase tracking-wider text-zinc-500">{t("password")}</Label>
               <Input
                 data-testid="login-password-input"
                 type="password"
@@ -155,7 +159,7 @@ export default function Login() {
               data-testid="login-form-submit-button"
               className="w-full bg-white text-black hover:bg-zinc-200 rounded-full h-11 font-semibold transition-colors active:scale-95"
             >
-              {loading ? <Loader2 className="animate-spin" size={18} /> : mode === "login" ? "Belépés" : "Regisztráció"}
+              {loading ? <Loader2 className="animate-spin" size={18} /> : mode === "login" ? t("login") : t("register")}
             </Button>
           </form>
 
@@ -163,7 +167,7 @@ export default function Login() {
             <>
               <div className="flex items-center gap-3 my-6">
                 <div className="flex-1 h-px bg-white/10" />
-                <span className="text-xs text-zinc-500 uppercase tracking-wider">vagy</span>
+                <span className="text-xs text-zinc-500 uppercase tracking-wider">{t("or")}</span>
                 <div className="flex-1 h-px bg-white/10" />
               </div>
 
@@ -180,7 +184,7 @@ export default function Login() {
                 ) : (
                   <>
                     <img src="https://www.google.com/favicon.ico" alt="" className="w-4 h-4 mr-2" />
-                    Belépés Google-lel
+                    {t("googleLogin")}
                   </>
                 )}
               </Button>
@@ -188,14 +192,14 @@ export default function Login() {
           )}
 
           <p className="text-center text-sm text-zinc-400 mt-6">
-            {mode === "login" ? "Még nincs fiókod?" : "Van már fiókod?"}{" "}
+            {mode === "login" ? t("noAccount") : t("haveAccount")}{" "}
             <button
               type="button"
               onClick={() => setMode(mode === "login" ? "register" : "login")}
               data-testid="toggle-auth-mode"
               className="text-[#00E676] hover:underline font-medium"
             >
-              {mode === "login" ? "Regisztrálj" : "Lépj be"}
+              {mode === "login" ? t("registerAction") : t("loginAction")}
             </button>
           </p>
         </div>

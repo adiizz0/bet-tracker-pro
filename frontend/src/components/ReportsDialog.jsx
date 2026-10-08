@@ -1,6 +1,7 @@
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useLanguage } from "@/context/LanguageContext";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -10,6 +11,7 @@ import { toast } from "sonner";
 
 export default function ReportsDialog({ open, onOpenChange }) {
   const qc = useQueryClient();
+  const { t, locale } = useLanguage();
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ["reports"],
@@ -21,16 +23,16 @@ export default function ReportsDialog({ open, onOpenChange }) {
     mutationFn: () => api.post("/reports/pdf"),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["reports"] });
-      toast.success("Jelentés elmentve a fiókodhoz");
+      toast.success(t("reportSaved"));
     },
-    onError: () => toast.error("Nem sikerült elmenteni a jelentést"),
+    onError: () => toast.error(t("reportSavedFailed")),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/reports/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["reports"] });
-      toast.success("Jelentés törölve");
+      toast.success(t("reportDeleted"));
     },
   });
 
@@ -46,7 +48,7 @@ export default function ReportsDialog({ open, onOpenChange }) {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      toast.error("Letöltés sikertelen");
+      toast.error(t("reportDownloadFailed"));
     }
   };
 
@@ -55,10 +57,10 @@ export default function ReportsDialog({ open, onOpenChange }) {
       <DialogContent className="bg-[#0A0A0A] border-white/10 text-white max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-head text-2xl font-light tracking-tight flex items-center gap-2">
-            <FolderArchive size={22} className="text-[#00E676]" /> Mentett jelentések
+            <FolderArchive size={22} className="text-[#00E676]" /> {t("savedReports")}
           </DialogTitle>
           <DialogDescription className="text-zinc-500 text-sm">
-            Mentsd el az aktuális statisztikáid és fogadásaid PDF-be a fiókodba, és érd el bármely eszközről bejelentkezés után.
+            {t("saveReportDescription")}
           </DialogDescription>
         </DialogHeader>
 
@@ -68,14 +70,14 @@ export default function ReportsDialog({ open, onOpenChange }) {
           data-testid="create-cloud-report-button"
           className="bg-[#00E676] text-black hover:bg-[#00c765] rounded-full h-11 font-semibold active:scale-95 transition-colors"
         >
-          {createMutation.isPending ? <Loader2 className="animate-spin" size={18} /> : <><FileDown size={18} className="mr-2" /> Új jelentés mentése</>}
+          {createMutation.isPending ? <Loader2 className="animate-spin" size={18} /> : <><FileDown size={18} className="mr-2" /> {t("saveReport")}</>}
         </Button>
 
         <div className="max-h-72 overflow-y-auto space-y-2 mt-1" data-testid="reports-list">
           {isLoading ? (
             <div className="py-8 text-center text-zinc-500"><Loader2 className="animate-spin inline" size={20} /></div>
           ) : reports.length === 0 ? (
-            <div className="py-8 text-center text-zinc-500 text-sm">Még nincs mentett jelentés.</div>
+            <div className="py-8 text-center text-zinc-500 text-sm">{t("noSavedReports")}</div>
           ) : (
             reports.map((r) => (
               <div
@@ -86,18 +88,20 @@ export default function ReportsDialog({ open, onOpenChange }) {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-white truncate font-mono-data">{r.filename}</div>
                   <div className="text-xs text-zinc-500">
-                    {new Date(r.created_at).toLocaleString("hu-HU")} · {(r.size / 1024).toFixed(1)} KB
+                    {new Date(r.created_at).toLocaleString(locale)} · {(r.size / 1024).toFixed(1)} KB
                   </div>
                 </div>
                 <button
                   onClick={() => download(r)}
                   data-testid={`download-report-${r.report_id}`}
+                  aria-label={t("downloadReport")}
                   className="text-zinc-400 hover:text-[#00E676] p-2 transition-colors"
                 >
                   <Download size={16} />
                 </button>
                 <button
                   onClick={() => deleteMutation.mutate(r.report_id)}
+                  aria-label={t("delete")}
                   className="text-zinc-400 hover:text-loss p-2 transition-colors"
                 >
                   <Trash2 size={16} />

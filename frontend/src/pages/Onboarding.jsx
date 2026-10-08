@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,7 @@ const BG =
 export default function Onboarding() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { t } = useLanguage();
   const [form, setForm] = useState({
     starting_bankroll: 100000,
     currency: "HUF",
@@ -32,10 +34,10 @@ export default function Onboarding() {
     mutationFn: (data) => api.put("/settings", { ...data, onboarded: true }),
     onSuccess: (res) => {
       qc.setQueryData(["settings"], res.data);
-      toast.success("Beállítások mentve!");
+      toast.success(t("settingsSaved"));
       navigate("/");
     },
-    onError: () => toast.error("Hiba a mentés során"),
+    onError: () => toast.error(t("saveFailed")),
   });
 
   const submit = (e) => {
@@ -60,18 +62,18 @@ export default function Onboarding() {
         className="relative z-10 w-full max-w-lg"
       >
         <div className="mb-6 text-center">
-          <h1 className="font-head text-4xl font-light tracking-tighter text-white">Állítsuk be a bankrollod</h1>
-          <p className="text-sm text-zinc-400 mt-2">Néhány adat a pontos statisztikákhoz és a felelős fogadáshoz.</p>
+          <h1 className="font-head text-4xl font-light tracking-tighter text-white">{t("setCapital")}</h1>
+          <p className="text-sm text-zinc-400 mt-2">{t("setupSubtitle")}</p>
         </div>
 
         <form onSubmit={submit} className="glass rounded-3xl p-8 space-y-6">
           <div className="flex items-center gap-2 text-zinc-300">
             <Wallet size={18} className="text-[#00E676]" />
-            <span className="text-xs font-bold uppercase tracking-[0.2em]">Tőke</span>
+            <span className="text-xs font-bold uppercase tracking-[0.2em]">{t("capital")}</span>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label className="text-xs text-zinc-500">Kezdő bankroll</Label>
+              <Label className="text-xs text-zinc-500">{t("startBankroll")}</Label>
               <Input
                 data-testid="onboarding-bankroll-input"
                 type="number"
@@ -81,7 +83,7 @@ export default function Onboarding() {
               />
             </div>
             <div>
-              <Label className="text-xs text-zinc-500">Pénznem</Label>
+              <Label className="text-xs text-zinc-500">{t("currencyLabel")}</Label>
               <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
                 <SelectTrigger data-testid="onboarding-currency-select" className="mt-1.5 bg-white/5 border-white/10 text-white">
                   <SelectValue />
@@ -94,7 +96,7 @@ export default function Onboarding() {
               </Select>
             </div>
             <div>
-              <Label className="text-xs text-zinc-500">Tétegység (unit)</Label>
+              <Label className="text-xs text-zinc-500">{t("unitSize")}</Label>
               <Input
                 type="number"
                 value={form.unit_size}
@@ -106,10 +108,10 @@ export default function Onboarding() {
 
           <div className="flex items-center gap-2 text-zinc-300 pt-2">
             <Target size={18} className="text-[#00E676]" />
-            <span className="text-xs font-bold uppercase tracking-[0.2em]">Cél</span>
+            <span className="text-xs font-bold uppercase tracking-[0.2em]">{t("profitGoal")}</span>
           </div>
           <div>
-            <Label className="text-xs text-zinc-500">Profit cél</Label>
+            <Label className="text-xs text-zinc-500">{t("profitGoal")}</Label>
             <Input
               type="number"
               value={form.profit_goal}
@@ -120,11 +122,11 @@ export default function Onboarding() {
 
           <div className="flex items-center gap-2 text-zinc-300 pt-2">
             <ShieldAlert size={18} className="text-[#FFCC00]" />
-            <span className="text-xs font-bold uppercase tracking-[0.2em]">Felelős fogadás</span>
+            <span className="text-xs font-bold uppercase tracking-[0.2em]">{t("responsibleGambling")}</span>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label className="text-xs text-zinc-500">Napi tét-limit</Label>
+              <Label className="text-xs text-zinc-500">{t("dailyLimit")}</Label>
               <Input
                 type="number"
                 value={form.daily_limit}
@@ -133,7 +135,7 @@ export default function Onboarding() {
               />
             </div>
             <div>
-              <Label className="text-xs text-zinc-500">Heti tét-limit</Label>
+              <Label className="text-xs text-zinc-500">{t("weeklyLimit")}</Label>
               <Input
                 type="number"
                 value={form.weekly_limit}
@@ -149,7 +151,7 @@ export default function Onboarding() {
             data-testid="onboarding-submit-button"
             className="w-full bg-white text-black hover:bg-zinc-200 rounded-full h-11 font-semibold active:scale-95 transition-colors"
           >
-            {mutation.isPending ? <Loader2 className="animate-spin" size={18} /> : "Kezdjük!"}
+            {mutation.isPending ? <Loader2 className="animate-spin" size={18} /> : t("startNow")}
           </Button>
         </form>
       </motion.div>

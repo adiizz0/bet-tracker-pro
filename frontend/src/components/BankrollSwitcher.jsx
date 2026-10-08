@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, fmtMoney } from "@/lib/api";
+import { useLanguage } from "@/context/LanguageContext";
 import { CURRENCIES } from "@/lib/constants";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -26,6 +27,7 @@ const DATA_KEYS = ["bankrolls", "settings", "bets", "analytics", "limits"];
 
 export default function BankrollSwitcher() {
   const qc = useQueryClient();
+  const { t } = useLanguage();
   const [createOpen, setCreateOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -53,9 +55,9 @@ export default function BankrollSwitcher() {
       refreshAll();
       setCreateOpen(false);
       setForm({ name: "", starting_bankroll: "100000", currency: "HUF" });
-      toast.success("Bankroll létrehozva");
+      toast.success(t("booked"));
     },
-    onError: () => toast.error("Nem sikerült létrehozni"),
+    onError: () => toast.error(t("bankrollCreateFailed")),
   });
 
   const renameMut = useMutation({
@@ -63,7 +65,7 @@ export default function BankrollSwitcher() {
     onSuccess: () => {
       refreshAll();
       setRenameTarget(null);
-      toast.success("Átnevezve");
+      toast.success(t("renamed"));
     },
   });
 
@@ -72,15 +74,15 @@ export default function BankrollSwitcher() {
     onSuccess: () => {
       refreshAll();
       setDeleteTarget(null);
-      toast.success("Bankroll törölve");
+      toast.success(t("bankRollRemoved"));
     },
-    onError: (e) => toast.error(e.response?.data?.detail || "Nem sikerült törölni"),
+    onError: (e) => toast.error(e.response?.data?.detail || t("bankrollDeleteFailed")),
   });
 
   const submitCreate = (e) => {
     e.preventDefault();
     const name = form.name.trim();
-    if (!name) return toast.error("Adj nevet a bankrollnak");
+    if (!name) return toast.error(t("bankrollNameRequired"));
     createMut.mutate({
       name,
       starting_bankroll: Number(String(form.starting_bankroll).replace(",", ".")) || 0,
@@ -100,7 +102,7 @@ export default function BankrollSwitcher() {
               <Wallet size={15} className="text-[#00E676]" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500">Bankroll</div>
+              <div className="text-[10px] uppercase tracking-[0.15em] text-zinc-500">{t("bankroll")}</div>
               <div className="text-sm text-white font-medium truncate" data-testid="bankroll-active-name">
                 {active?.name || "—"}
               </div>
@@ -114,7 +116,7 @@ export default function BankrollSwitcher() {
           data-testid="bankroll-switcher-menu"
         >
           <DropdownMenuLabel className="text-zinc-500 text-[10px] uppercase tracking-[0.15em]">
-            Bankrollok
+            {t("bankrollsLabel")}
           </DropdownMenuLabel>
           {bankrolls.map((b) => (
             <DropdownMenuItem
@@ -136,7 +138,7 @@ export default function BankrollSwitcher() {
                 onClick={(e) => { e.stopPropagation(); setRenameTarget(b); setRenameName(b.name); }}
                 data-testid={`bankroll-rename-${b.bankroll_id}`}
                 className="p-1 text-zinc-500 hover:text-white"
-                title="Átnevezés"
+                title={t("rename")}
               >
                 <Pencil size={13} />
               </button>
@@ -145,7 +147,7 @@ export default function BankrollSwitcher() {
                   onClick={(e) => { e.stopPropagation(); setDeleteTarget(b); }}
                   data-testid={`bankroll-delete-${b.bankroll_id}`}
                   className="p-1 text-zinc-500 hover:text-loss"
-                  title="Törlés"
+                  title={t("delete")}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -159,7 +161,7 @@ export default function BankrollSwitcher() {
             className="flex items-center gap-2 cursor-pointer text-[#00E676] focus:bg-white/[0.06] focus:text-[#00E676]"
           >
             <Plus size={15} />
-            Új bankroll
+            {t("newBankroll")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -168,23 +170,23 @@ export default function BankrollSwitcher() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="bg-[#0A0A0A] border-white/10 text-white" data-testid="bankroll-create-dialog">
           <DialogHeader>
-            <DialogTitle>Új bankroll</DialogTitle>
+            <DialogTitle>{t("newBankroll")}</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitCreate} className="space-y-4">
             <div>
-              <Label className="text-xs text-zinc-500">Név</Label>
+              <Label className="text-xs text-zinc-500">{t("name")}</Label>
               <Input
                 data-testid="bankroll-name-input"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="pl. Foci kassza"
+                placeholder={t("bankrollPlaceholder")}
                 className="mt-1.5 bg-white/5 border-white/10 text-white"
                 autoFocus
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-xs text-zinc-500">Kezdő tőke</Label>
+                <Label className="text-xs text-zinc-500">{t("startBankroll")}</Label>
                 <Input
                   data-testid="bankroll-starting-input"
                   inputMode="decimal"
@@ -194,7 +196,7 @@ export default function BankrollSwitcher() {
                 />
               </div>
               <div>
-                <Label className="text-xs text-zinc-500">Pénznem</Label>
+                <Label className="text-xs text-zinc-500">{t("currencyLabel")}</Label>
                 <Select value={form.currency} onValueChange={(v) => setForm((f) => ({ ...f, currency: v }))}>
                   <SelectTrigger data-testid="bankroll-currency-select" className="mt-1.5 bg-white/5 border-white/10 text-white">
                     <SelectValue />
@@ -207,10 +209,10 @@ export default function BankrollSwitcher() {
             </div>
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)} className="text-zinc-400">
-                Mégse
+                {t("cancel")}
               </Button>
               <Button type="submit" data-testid="bankroll-create-submit" disabled={createMut.isPending} className="bg-[#00E676] text-black hover:bg-[#00c766]">
-                Létrehozás
+                {t("create")}
               </Button>
             </DialogFooter>
           </form>
@@ -221,10 +223,10 @@ export default function BankrollSwitcher() {
       <Dialog open={!!renameTarget} onOpenChange={(o) => !o && setRenameTarget(null)}>
         <DialogContent className="bg-[#0A0A0A] border-white/10 text-white" data-testid="bankroll-rename-dialog">
           <DialogHeader>
-            <DialogTitle>Bankroll átnevezése</DialogTitle>
+            <DialogTitle>{t("renameBankroll")}</DialogTitle>
           </DialogHeader>
           <div>
-            <Label className="text-xs text-zinc-500">Név</Label>
+            <Label className="text-xs text-zinc-500">{t("name")}</Label>
             <Input
               data-testid="bankroll-rename-input"
               value={renameName}
@@ -234,14 +236,14 @@ export default function BankrollSwitcher() {
             />
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRenameTarget(null)} className="text-zinc-400">Mégse</Button>
+            <Button variant="ghost" onClick={() => setRenameTarget(null)} className="text-zinc-400">{t("cancel")}</Button>
             <Button
               data-testid="bankroll-rename-submit"
               disabled={renameMut.isPending || !renameName.trim()}
               onClick={() => renameMut.mutate({ id: renameTarget.bankroll_id, name: renameName.trim() })}
               className="bg-[#00E676] text-black hover:bg-[#00c766]"
             >
-              Mentés
+              {t("save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -251,22 +253,21 @@ export default function BankrollSwitcher() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent className="bg-[#0A0A0A] border-white/10 text-white" data-testid="bankroll-delete-dialog">
           <AlertDialogHeader>
-            <AlertDialogTitle>Bankroll törlése</AlertDialogTitle>
+            <AlertDialogTitle>{t("deleteBankroll")}</AlertDialogTitle>
             <AlertDialogDescription className="text-zinc-400">
-              Biztosan törlöd a(z) <span className="text-white font-medium">{deleteTarget?.name}</span> bankrollt?
-              Az összes hozzá tartozó fogadás is véglegesen törlődik. Ez nem vonható vissza.
+              {t("confirmDeleteBankroll").replace("{name}", deleteTarget?.name || "")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="bg-transparent border-white/10 text-zinc-300 hover:bg-white/5 hover:text-white">
-              Mégse
+              {t("cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               data-testid="bankroll-delete-confirm"
               onClick={() => deleteMut.mutate(deleteTarget.bankroll_id)}
               className="bg-loss text-white hover:bg-loss/90"
             >
-              Törlés
+              {t("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
