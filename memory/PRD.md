@@ -65,3 +65,15 @@ Stack: FastAPI + SQLAlchemy 2.1 (async) + asyncpg + Alembic + PostgreSQL.
   -> alembic `163d14bd6f54 (head)`, 7 tábla létrejött, smoke test 34/34 PASS a 8002-es porton,
   majd a supervisor backenden (8001) is 34/34 PASS. testing_agent: backend 100%, 0 issue.
 - `tests/test_pg_migration_smoke.py`: pytest wrapper (a smoke scriptet subprocessként futtatja, nincs enyhítés).
+
+## Végső validáció (2026-06)
+- GitHub main (`148fd4a`) tartalmazza: `uvicorn[standard]==0.30.6`, `python -m uvicorn` (compose + Dockerfile),
+  db.py/models.py/alembic/versions, postgres:16 + healthcheck + persistent volume.
+- Hiba, amit most találtam és javítottam: a repó régi `.gitignore` szabályai (`.env.*`, `*.env`) kizárták a
+  `.env.example` sablonokat a commitból -> `!.env.example` és `!backend/.env.example` negáció hozzáadva.
+- Docker: ebben a konténerben NINCS docker (nincs bináris, nincs /var/run/docker.sock) -> a
+  `docker compose up` NEM futtatható, csak a compose YAML statikus validációja történt meg.
+- Smoke test (eredeti, módosítás nélkül): 34 PASS / 0 FAIL. Alembic: 163d14bd6f54 (head).
+  testing_agent iteration_2: backend 100%, 0 issue.
+- Megjegyzés: `python -m pytest tests/pg_migration_smoke.py` 0 tesztet gyűjt be (a fájlnév nem test_*.py),
+  ezért a script közvetlen futtatása a mérvadó; pytesthez a `tests/test_pg_migration_smoke.py` wrapper van.
