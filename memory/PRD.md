@@ -19,8 +19,14 @@ JWT (HS256) + bcrypt auth, opcionális Google OAuth. ODDS API integráció (the-
   `${...}` env-referenciák lettek; CORS_ORIGINS is env-ből.
 - Backend .env: CORS_ORIGINS, JWT_SECRET, ADMIN_EMAIL/ADMIN_PASSWORD, rate-limit paraméterek.
 
-## Szándékosan NEM javítva (user kérése: "nem kell ez az oddsos hulyeseg")
-- docker-compose.yml-ben bekommitolt éles ODDS_API_KEY — érintetlen. Ajánlott a kulcs rotálása.
+## Live Odds eltávolítása (2026-06)
+A teljes "Élő Szorzók" (Live Odds) funkció kikerült a projektből, user kérésére:
+- Backend: `/api/odds/sports` és `/api/odds/{sport}` endpointok, `DEMO_SPORTS`, `demo_odds()`,
+  `ODDS_API_KEY` / `ODDS_API_BASE` config törölve (httpx megmarad a Google OAuth-hoz).
+- Frontend: `pages/LiveOdds.jsx` törölve, App.js route + import, Layout nav item (`Radio` ikon) törölve.
+- Config/doc: docker-compose ODDS env-ek, README / DEPLOY_VERCEL / DEPLOY_GOOGLE / DEPLOY_FIREBASE
+  odds-hivatkozásai törölve. `backend/tests/test_bettracker.py` `TestOdds` osztály törölve.
+- A fogadások `odds` (szorzó) mezője, profit-számítás, statisztikák, bankroll, auth változatlan.
 
 ## Backlog (P1/P2)
 - Google OAuth callback token a query stringben (napló-szivárgás) → cookie/fragment.

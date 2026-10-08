@@ -164,22 +164,6 @@ class TestAnalyticsLimitsExport:
         assert "Dátum" in r.text or "Datum" in r.text
 
 
-# ---------------- Odds ----------------
-class TestOdds:
-    def test_odds_sports(self, new_user_session):
-        s = new_user_session["session"]
-        r = s.get(f"{API}/odds/sports")
-        assert r.status_code == 200
-        d = r.json()
-        assert "data" in d and isinstance(d["data"], list)
-
-    def test_odds_for_sport(self, new_user_session):
-        s = new_user_session["session"]
-        r = s.get(f"{API}/odds/soccer_epl")
-        assert r.status_code == 200
-        assert "data" in r.json()
-
-
 # ---------------- CSV Import (new) ----------------
 class TestCsvImport:
     def test_import_hungarian_csv(self, new_user_session):

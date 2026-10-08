@@ -44,7 +44,6 @@ pip install -r requirements.txt
 #   MONGO_URL=mongodb://localhost:27017
 #   DB_NAME=bettracker
 #   JWT_SECRET=valami-hosszu-titok
-#   ODDS_API_KEY=<the-odds-api kulcs>
 #   CORS_ORIGINS=http://localhost:3000
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 ```

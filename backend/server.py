@@ -34,8 +34,6 @@ if not JWT_SECRET:
 JWT_ALGORITHM = "HS256"
 COOKIE_SECURE = os.environ.get('COOKIE_SECURE', 'true').lower() == 'true'
 COOKIE_SAMESITE = os.environ.get('COOKIE_SAMESITE', 'lax').lower()
-ODDS_API_KEY = os.environ.get('ODDS_API_KEY', '')
-ODDS_API_BASE = os.environ.get('ODDS_API_BASE', 'https://api.the-odds-api.com/v4')
 
 # Google OAuth 2.0 (only active when both env vars are set)
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
@@ -947,67 +945,6 @@ async def delete_report(report_id: str, user: dict = Depends(get_current_user)):
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Jelentés nem található")
     return {"ok": True}
-
-
-# ---------------- Odds ----------------
-DEMO_SPORTS = [
-    {"key": "soccer_epl", "title": "Angol Premier League", "group": "Labdarúgás"},
-    {"key": "soccer_uefa_champs_league", "title": "Bajnokok Ligája", "group": "Labdarúgás"},
-    {"key": "basketball_nba", "title": "NBA", "group": "Kosárlabda"},
-    {"key": "tennis_atp", "title": "ATP Tenisz", "group": "Tenisz"},
-]
-
-def demo_odds(sport):
-    base = datetime.now(timezone.utc)
-    games = [
-        ("Arsenal", "Chelsea", 1.95, 3.60, 3.80),
-        ("Liverpool", "Man City", 2.40, 3.30, 2.90),
-        ("Real Madrid", "Barcelona", 2.10, 3.50, 3.40),
-        ("Bayern", "Dortmund", 1.70, 4.00, 4.50),
-    ]
-    out = []
-    for i, (h, a, oh, od, oa) in enumerate(games):
-        out.append({
-            "id": f"demo_{i}", "sport_key": sport, "sport_title": sport,
-            "commence_time": (base + timedelta(hours=6 + i * 3)).isoformat(),
-            "home_team": h, "away_team": a,
-            "bookmakers": [{"key": "demo", "title": "Demo Iroda", "markets": [
-                {"key": "h2h", "outcomes": [
-                    {"name": h, "price": oh}, {"name": "Döntetlen", "price": od}, {"name": a, "price": oa}]}]}],
-        })
-    return out
-
-
-@api_router.get("/odds/sports")
-async def odds_sports(user: dict = Depends(get_current_user)):
-    if not ODDS_API_KEY:
-        return {"data": DEMO_SPORTS, "demo": True}
-    try:
-        async with httpx.AsyncClient(timeout=20) as hc:
-            r = await hc.get(f"{ODDS_API_BASE}/sports", params={"apiKey": ODDS_API_KEY})
-        if r.status_code != 200:
-            return {"data": DEMO_SPORTS, "demo": True}
-        data = [s for s in r.json() if s.get("active")]
-        return {"data": data, "demo": False}
-    except Exception:
-        return {"data": DEMO_SPORTS, "demo": True}
-
-
-@api_router.get("/odds/{sport}")
-async def odds_for_sport(sport: str, user: dict = Depends(get_current_user)):
-    if not ODDS_API_KEY:
-        return {"data": demo_odds(sport), "demo": True}
-    try:
-        async with httpx.AsyncClient(timeout=20) as hc:
-            r = await hc.get(f"{ODDS_API_BASE}/sports/{sport}/odds",
-                             params={"apiKey": ODDS_API_KEY, "regions": "eu",
-                                     "markets": "h2h", "oddsFormat": "decimal", "dateFormat": "iso"})
-        if r.status_code != 200:
-            return {"data": demo_odds(sport), "demo": True}
-        return {"data": r.json(), "demo": False,
-                "remaining": r.headers.get("x-requests-remaining")}
-    except Exception:
-        return {"data": demo_odds(sport), "demo": True}
 
 
 @api_router.get("/")

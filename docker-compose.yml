@@ -20,8 +20,6 @@ services:
       MONGO_URL: "mongodb://mongo:27017"
       DB_NAME: "bettracker"
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET env var is required}"
-      ODDS_API_KEY: "707d626d086077945c45a2aca1b9da1e"
-      ODDS_API_BASE: "https://api.the-odds-api.com/v4"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
       COOKIE_SECURE: "false"
       COOKIE_SAMESITE: "lax"
