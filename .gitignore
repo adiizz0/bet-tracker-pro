@@ -96,3 +96,8 @@ frontend/.env
 
 # local postgres data dir (preview container)
 .pgdata/
+.env.*
+*.env
+credentials.json
+*.key
+.credentials
