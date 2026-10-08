@@ -55,3 +55,13 @@ Stack: FastAPI + SQLAlchemy 2.1 (async) + asyncpg + Alembic + PostgreSQL.
   backend `depends_on: service_healthy`, minden credential env-referencia. `.env.example` a gyökérben és backendben.
 - Teszt: `tests/pg_migration_smoke.py` — 34/34 PASS (auth, JWT, /me, bankrollok, bets CRUD,
   analytics, limits, pagination, user isolation, CSV import/export, PDF create/list/download/delete, cascade).
+
+## Docker backend fix (2026-06)
+- Bug: `exec: "uvicorn": executable file not found in $PATH` — a `backend/requirements.txt`-ből hiányzott az uvicorn
+  (a preview podban globálisan telepítve volt, a Docker image-ben nem).
+- Fix: `uvicorn[standard]==0.30.6` a requirements.txt-be; indítás `python -m uvicorn ...` formában a
+  `docker-compose.yml`-ben és a `backend/Dockerfile` CMD-ben (nem függ a console-script PATH-tól).
+- Validálás (Docker nincs a podban): tiszta venv-be telepített requirements.txt + üres `bettracker_docker` DB
+  -> alembic `163d14bd6f54 (head)`, 7 tábla létrejött, smoke test 34/34 PASS a 8002-es porton,
+  majd a supervisor backenden (8001) is 34/34 PASS. testing_agent: backend 100%, 0 issue.
+- `tests/test_pg_migration_smoke.py`: pytest wrapper (a smoke scriptet subprocessként futtatja, nincs enyhítés).

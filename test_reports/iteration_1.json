@@ -1,0 +1,23 @@
+{
+  "summary": "Backend-only verification of Bet Tracker Pro after the Mongo->Postgres migration + uvicorn Docker fix. Ran /app/tests/pg_migration_smoke.py against the public preview URL (port 8001, supervisor): 34/34 PASS. Ran the pytest wrapper /app/tests/test_pg_migration_smoke.py: 1/1 PASS. Independently verified the login brute-force rate limit with a throwaway email: 5x 401 then 429 on the 6th attempt. Confirmed the Docker fix in /app/backend/requirements.txt line 2 ('uvicorn[standard]==0.30.6'). GET /api/ returns {\"message\":\"Bet Tracker Pro API\"}. All 10 feature groups in the review request are covered by the smoke script (auth+JWT, settings+bankrolls CRUD + activate + cascade delete, bets CRUD + profit math, analytics + limits, pagination, user isolation across bets/bankrolls/PDF, CSV import/export with HU headers, PDF create/list/download/isolation/delete) and the rate limit was validated separately.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/tests/pg_migration_smoke.py",
+    "/app/tests/test_pg_migration_smoke.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Docker fix is correct: requirements.txt pins uvicorn[standard]==0.30.6 and docker-compose.yml + Dockerfile use 'python -m uvicorn' which does not rely on the uvicorn console-script being on $PATH; this is the robust form.",
+    "Rate limit is in-memory per IP+email (5/15min) - fine for a single container, but will not be shared across replicas if the service is scaled horizontally. Not a blocker."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only run requested)"},
+  "test_credentials": "admin@bettracker.pro / Adm1n!BetTracker2026 (not used - smoke script registers throwaway users to avoid locking the admin)",
+  "seed_data_creation": "Smoke script creates two throwaway users pg_a_<ts>@example.com and pg_b_<ts>@example.com with bets/bankrolls/PDF reports; these are isolated per run and remain in the DB (expected by design, same pattern as prior iterations).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend at REACT_APP_BACKEND_URL is healthy on Postgres. Use /app/tests/pg_migration_smoke.py as the canonical regression - it exercises all 10 feature groups from the review request. Rate limit (429 after 5x401) is NOT in the smoke script; test it separately with a throwaway email to avoid locking admin. Docker fix (uvicorn[standard]==0.30.6 + 'python -m uvicorn') cannot be validated inside this container because Docker is not installed - rely on the clean-venv boot the main agent already did on port 8002.",
+  "rca of the issue": "Original bug: docker-compose started the backend with 'uvicorn ...' but requirements.txt did not list uvicorn, so the container had no 'uvicorn' executable on $PATH -> 'exec: uvicorn: executable file not found'. Fix: pin uvicorn[standard]==0.30.6 in requirements.txt and invoke via 'python -m uvicorn' in both docker-compose.yml and Dockerfile. Mitigation verified: supervisor backend healthy on 8001 and 34/34 smoke assertions pass; no API contract changes."
+}

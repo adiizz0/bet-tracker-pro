@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="5.364" timestamp="2026-10-08T11:37:11.238114+00:00" hostname="agent-env-06ef6c04-140c-41ee-9688-67e7238b6c75"><testcase classname="tests.test_pg_migration_smoke" name="test_pg_migration_smoke" time="5.349" /></testsuite></testsuites>
