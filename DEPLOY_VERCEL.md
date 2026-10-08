@@ -19,8 +19,7 @@ Az első deploy után az összes `/api/*` **500 hibát** dob, ha az env változ�
 
 | Név | Érték | Kritikus |
 |-----|-------|----------|
-| `MONGO_URL` | MongoDB Atlas connection string | 🔴 KELL |
-| `DB_NAME` | `bettracker` | 🔴 KELL |
+| `DATABASE_URL` | PostgreSQL connection string (`postgresql+asyncpg://...`) | 🔴 KELL |
 | `JWT_SECRET` | 64 karakteres random string | 🔴 KELL |
 | `ADMIN_EMAIL` | `admin@bettracker.pro` | 🟡 admin seedhez |
 | `ADMIN_PASSWORD` | `admin123` | 🟡 admin seedhez |

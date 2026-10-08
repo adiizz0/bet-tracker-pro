@@ -1,12 +1,21 @@
 services:
-  mongo:
-    image: mongo:7
-    container_name: btp-mongo
+  postgres:
+    image: postgres:16
+    container_name: btp-postgres
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER env var is required}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD env var is required}"
+      POSTGRES_DB: "${POSTGRES_DB:-bettracker}"
     ports:
-      - "27017:27017"
+      - "5432:5432"
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build: ./backend
@@ -17,8 +26,8 @@ services:
     volumes:
       - ./backend:/app
     environment:
-      MONGO_URL: "mongodb://mongo:27017"
-      DB_NAME: "bettracker"
+      DATABASE_URL: "${DATABASE_URL:?DATABASE_URL env var is required}"
+      RUN_MIGRATIONS_ON_STARTUP: "true"
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET env var is required}"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
       COOKIE_SECURE: "false"
@@ -28,7 +37,8 @@ services:
     ports:
       - "8001:8001"
     depends_on:
-      - mongo
+      postgres:
+        condition: service_healthy
 
   frontend:
     image: node:20
@@ -52,5 +62,5 @@ services:
       - backend
 
 volumes:
-  mongo_data:
+  postgres_data:
   frontend_node_modules:

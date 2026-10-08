@@ -1,6 +1,6 @@
 # Bet Tracker Pro v4
 
-Sportfogadási bankroll követő — **monorepo**: React frontend + FastAPI backend + MongoDB.
+Sportfogadási bankroll követő — **monorepo**: React frontend + FastAPI backend + PostgreSQL (SQLAlchemy 2 + asyncpg + Alembic).
 
 > ⚠️ A repo GYÖKERÉBEN nincs futtatható alkalmazás. Ne futtass itt `npm install`-t!
 > A frontend a `frontend/`, a backend a `backend/` mappában van.
@@ -11,18 +11,19 @@ Ha van Docker (a GitHub Codespace-ben alapból van), a repo gyökeréből:
 ```bash
 docker compose up --build
 ```
-Ez elindítja egyszerre: **MongoDB + backend (8001) + frontend (3000)**.
+Ez elindítja egyszerre: **PostgreSQL 16 + backend (8001) + frontend (3000)**.
+A `.env`-et a repo gyökerében a `backend/.env.example` alapján hozd létre (POSTGRES_USER, POSTGRES_PASSWORD, DATABASE_URL, JWT_SECRET, CORS_ORIGINS, ADMIN_EMAIL, ADMIN_PASSWORD).
 Nyisd meg: **http://localhost:3000** (Codespace-ben a „Ports” fülön a 3000-es port).
-Leállítás: `Ctrl+C`, majd `docker compose down` (adatok megmaradnak a `mongo_data` kötetben).
+Leállítás: `Ctrl+C`, majd `docker compose down` (adatok megmaradnak a `postgres_data` kötetben).
 
-Belépés (auto-létrehozott admin): `admin@bettracker.pro` / `admin123`.
+Belépés: az `ADMIN_EMAIL` / `ADMIN_PASSWORD` env változókkal seedelt admin fiók.
 
 
 ## Mappaszerkezet
 ```
 bet-tracker-pro/
 ├── frontend/     # React (CRA + Craco) — yarn
-├── backend/      # FastAPI (Python) + MongoDB
+├── backend/      # FastAPI (Python) + PostgreSQL (SQLAlchemy/Alembic)
 ├── netlify.toml  # Netlify deploy config (base: frontend)
 └── package.json  # csak kényelmi szkriptek (nem valódi app)
 ```
@@ -41,13 +42,13 @@ yarn start          # http://localhost:3000
 cd backend
 pip install -r requirements.txt
 # .env szükséges változók:
-#   MONGO_URL=mongodb://localhost:27017
-#   DB_NAME=bettracker
+#   DATABASE_URL=postgresql+asyncpg://USER:PASS@localhost:5432/bettracker
 #   JWT_SECRET=valami-hosszu-titok
 #   CORS_ORIGINS=http://localhost:3000
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 ```
-> Kell egy futó MongoDB (helyben vagy MongoDB Atlas — állítsd be a `MONGO_URL`-t).
+> Kell egy futó PostgreSQL (helyben vagy managed, pl. Neon/Supabase/RDS — állítsd be a `DATABASE_URL`-t).
+> A migrációk induláskor automatikusan lefutnak (`alembic upgrade head`); kézzel: `cd backend && python -m alembic upgrade head`.
 
 ## Gyökér kényelmi szkriptek (opcionális)
 A repo gyökeréből:

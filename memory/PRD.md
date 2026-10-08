@@ -19,8 +19,7 @@ JWT (HS256) + bcrypt auth, opcionális Google OAuth. ODDS API integráció (the-
   `${...}` env-referenciák lettek; CORS_ORIGINS is env-ből.
 - Backend .env: CORS_ORIGINS, JWT_SECRET, ADMIN_EMAIL/ADMIN_PASSWORD, rate-limit paraméterek.
 
-## Live Odds eltávolítása (2026-06)
-A teljes "Élő Szorzók" (Live Odds) funkció kikerült a projektből, user kérésére:
+## Live Odds eltávolítása (2026-06)A teljes "Élő Szorzók" (Live Odds) funkció kikerült a projektből, user kérésére:
 - Backend: `/api/odds/sports` és `/api/odds/{sport}` endpointok, `DEMO_SPORTS`, `demo_odds()`,
   `ODDS_API_KEY` / `ODDS_API_BASE` config törölve (httpx megmarad a Google OAuth-hoz).
 - Frontend: `pages/LiveOdds.jsx` törölve, App.js route + import, Layout nav item (`Radio` ikon) törölve.
@@ -32,3 +31,27 @@ A teljes "Élő Szorzók" (Live Odds) funkció kikerült a projektből, user ké
 - Google OAuth callback token a query stringben (napló-szivárgás) → cookie/fragment.
 - PDF riportok base64-ben a Mongóban → object storage.
 - Rate limit perzisztens tárolóban (Mongo/Redis), ha több backend instance lesz.
+
+## MongoDB -> PostgreSQL migráció (2026-06)
+Stack: FastAPI + SQLAlchemy 2.1 (async) + asyncpg + Alembic + PostgreSQL.
+- `backend/db.py`: async engine + connection pool (DB_POOL_SIZE/MAX_OVERFLOW/RECYCLE env), `SessionLocal`,
+  `run_migrations()` (alembic upgrade head, startupkor `RUN_MIGRATIONS_ON_STARTUP=true` mellett).
+- `backend/models.py`: normalizált schema — surrogate BIGSERIAL PK + `public_id` business key
+  (user_/br_/bet_/rep_ prefix, így az API contract nem változott).
+  users, user_sessions, bankrolls, settings (1:1 user, active_bankroll_id FK SET NULL),
+  bets (FK users+bankrolls ON DELETE CASCADE, CHECK a result értékekre), reports (pdf_data BYTEA).
+  created_at/updated_at minden fő táblán; indexek: bets(user_id,bankroll_id,bet_date),
+  bets(bankroll_id), bankrolls(user_id,created_at), reports(user_id,created_at),
+  user_sessions(user_id), user_sessions(expires_at), unique: users.email, *.public_id.
+- `backend/alembic/` + `alembic.ini`: initial migration `163d14bd6f54_initial_schema.py` (async env.py).
+- `server.py`: minden Mongo query SQLAlchemy-re cserélve, user isolation minden query WHERE-jében
+  (user_id), `/bets` és `/reports` server-side `limit`/`offset` paraméterrel (default = korábbi viselkedés),
+  analytics/export `stream_scalars(yield_per=500)`-szal olvas.
+- Mongo eltávolítva: motor/pymongo kivéve a requirements.txt-ből, nincs Mongo kód.
+  (A `backend/.env`-ben a platform által védett MONGO_URL/DB_NAME kulcsok benne maradtak, de nincsenek használva.)
+- Preview: lokális PostgreSQL 15 a konténerben (PGDATA=/app/.pgdata, supervisor program: postgresql).
+  FIGYELEM: Emergent Deploy után ez NEM indul el — ott managed Postgres DATABASE_URL kell.
+- docker-compose: postgres:16 + healthcheck (pg_isready) + persistent volume `postgres_data`,
+  backend `depends_on: service_healthy`, minden credential env-referencia. `.env.example` a gyökérben és backendben.
+- Teszt: `tests/pg_migration_smoke.py` — 34/34 PASS (auth, JWT, /me, bankrollok, bets CRUD,
+  analytics, limits, pagination, user isolation, CSV import/export, PDF create/list/download/delete, cascade).
