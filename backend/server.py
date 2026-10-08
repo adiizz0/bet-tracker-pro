@@ -15,25 +15,23 @@ load_dotenv(ROOT_DIR / '.env')
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Header, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
+from sqlalchemy import delete, func, select, update
 import bcrypt
 import jwt
 import httpx
 import requests
 
+from db import SessionLocal, engine, run_migrations
+from models import Bankroll, Bet, Report, Settings, User, UserSession
+
 # ---------------- Config ----------------
-# Robust env-var loading: safe defaults where possible, clear runtime error otherwise.
-# Vercel serverless imports this module before every cold-start; a KeyError here
-# would break every /api/* endpoint (root cause of the 2026-01 production outage).
-MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-DB_NAME = os.environ.get('DB_NAME', 'bettracker')
-JWT_SECRET = os.environ.get('JWT_SECRET') or 'CHANGE_ME_INSECURE_DEFAULT_SET_JWT_SECRET_ENV_VAR'
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET environment variable is required (no insecure fallback allowed)")
 JWT_ALGORITHM = "HS256"
 COOKIE_SECURE = os.environ.get('COOKIE_SECURE', 'true').lower() == 'true'
 COOKIE_SAMESITE = os.environ.get('COOKIE_SAMESITE', 'lax').lower()
-ODDS_API_KEY = os.environ.get('ODDS_API_KEY', '')
-ODDS_API_BASE = os.environ.get('ODDS_API_BASE', 'https://api.the-odds-api.com/v4')
 
 # Google OAuth 2.0 (only active when both env vars are set)
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
@@ -42,12 +40,7 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
-
-# ---------------- Reports store in DB (per account) ----------------
 APP_NAME = "bettrackerpro"
-
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -55,10 +48,29 @@ api_router = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-if JWT_SECRET.startswith("CHANGE_ME"):
-    logger.warning("JWT_SECRET env var is NOT set — using an insecure fallback. Set JWT_SECRET on Vercel!")
-if not os.environ.get('MONGO_URL'):
-    logger.warning("MONGO_URL env var is NOT set — using localhost fallback. Set MONGO_URL on Vercel!")
+
+# ---------------- Login rate limiting (in-memory, per IP+email) ----------------
+LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', '5'))
+LOGIN_WINDOW_SECONDS = int(os.environ.get('LOGIN_WINDOW_SECONDS', '900'))
+LOGIN_ATTEMPTS: dict = {}
+
+
+def client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def login_rate_limited(key: str) -> bool:
+    now = datetime.now(timezone.utc).timestamp()
+    hits = [t for t in LOGIN_ATTEMPTS.get(key, []) if now - t < LOGIN_WINDOW_SECONDS]
+    LOGIN_ATTEMPTS[key] = hits
+    return len(hits) >= LOGIN_MAX_ATTEMPTS
+
+
+def register_login_failure(key: str) -> None:
+    LOGIN_ATTEMPTS.setdefault(key, []).append(datetime.now(timezone.utc).timestamp())
 
 
 # ---------------- Auth helpers ----------------
@@ -81,45 +93,52 @@ def set_auth_cookie(response: Response, key: str, value: str, max_age: int):
                         samesite=COOKIE_SAMESITE, max_age=max_age, path="/")
 
 
+def user_row_to_dict(u: User) -> dict:
+    return {"id": u.id, "user_id": u.public_id, "email": u.email, "name": u.name,
+            "picture": u.picture, "auth_provider": u.auth_provider,
+            "created_at": u.created_at.isoformat() if u.created_at else None}
+
+
 async def get_current_user(request: Request) -> dict:
-    # 1) Google session_token cookie
+    # 1) Google session_token cookie / bearer
     session_token = request.cookies.get("session_token")
     if not session_token:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             session_token = auth_header[7:]
 
-    if session_token:
-        sess = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
-        if sess:
-            expires_at = sess["expires_at"]
-            if isinstance(expires_at, str):
-                expires_at = datetime.fromisoformat(expires_at)
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at >= datetime.now(timezone.utc):
-                user = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
-                if user:
-                    return user
+    async with SessionLocal() as s:
+        if session_token:
+            row = (await s.execute(
+                select(User, UserSession.expires_at)
+                .join(UserSession, UserSession.user_id == User.id)
+                .where(UserSession.session_token == session_token)
+            )).first()
+            if row:
+                user, expires_at = row
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at >= datetime.now(timezone.utc):
+                    return user_row_to_dict(user)
 
-    # 2) JWT access token (cookie or bearer)
-    token = request.cookies.get("access_token")
-    if not token:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-    if not token:
-        raise HTTPException(status_code=401, detail="Nincs bejelentkezve")
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user = await db.users.find_one({"user_id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+        # 2) JWT access token (cookie or bearer)
+        token = request.cookies.get("access_token")
+        if not token:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+        if not token:
+            raise HTTPException(status_code=401, detail="Nincs bejelentkezve")
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="Lejárt munkamenet")
+        except jwt.InvalidTokenError:
+            raise HTTPException(status_code=401, detail="Érvénytelen token")
+        user = (await s.execute(select(User).where(User.public_id == payload["sub"]))).scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=401, detail="Felhasználó nem található")
-        return user
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Lejárt munkamenet")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Érvénytelen token")
+        return user_row_to_dict(user)
 
 
 # ---------------- Models ----------------
@@ -193,45 +212,67 @@ DEFAULT_BANKROLL = {"starting_bankroll": 100000, "currency": "HUF",
                     "unit_size": 1000, "profit_goal": 0, "daily_limit": 0, "weekly_limit": 0}
 
 
-async def get_or_create_settings(user_id: str) -> dict:
-    s = await db.settings.find_one({"user_id": user_id}, {"_id": 0})
-    if not s:
-        s = {"user_id": user_id, "onboarded": False, "active_bankroll_id": None}
-        await db.settings.insert_one(dict(s))
-    return s
+def _f(v) -> float:
+    return float(v) if v is not None else 0.0
 
 
-async def ensure_bankrolls(user_id: str) -> dict:
-    """Ensure the user has >=1 bankroll (migrating legacy settings once) and
-    return the active bankroll document (without _id)."""
-    s = await db.settings.find_one({"user_id": user_id})
-    if not s:
-        s = {"user_id": user_id, "onboarded": False, "active_bankroll_id": None}
-        await db.settings.insert_one(dict(s))
-    count = await db.bankrolls.count_documents({"user_id": user_id})
+def bankroll_dict(br: Bankroll, user_public_id: str) -> dict:
+    return {"bankroll_id": br.public_id, "user_id": user_public_id, "name": br.name,
+            "starting_bankroll": _f(br.starting_bankroll), "currency": br.currency,
+            "unit_size": _f(br.unit_size), "profit_goal": _f(br.profit_goal),
+            "daily_limit": _f(br.daily_limit), "weekly_limit": _f(br.weekly_limit),
+            "created_at": br.created_at.isoformat() if br.created_at else None}
+
+
+def bet_dict(b: Bet, user_public_id: str, bankroll_public_id: str) -> dict:
+    return {"bet_id": b.public_id, "user_id": user_public_id, "bankroll_id": bankroll_public_id,
+            "date": b.bet_date.isoformat(), "sport": b.sport, "market": b.market,
+            "selection": b.selection, "stake": _f(b.stake), "odds": _f(b.odds),
+            "units": float(b.units) if b.units is not None else None,
+            "result": b.result, "bookmaker": b.bookmaker, "note": b.note,
+            "profit": _f(b.profit),
+            "created_at": b.created_at.isoformat() if b.created_at else None}
+
+
+def report_dict(r: Report, user_public_id: str) -> dict:
+    return {"report_id": r.public_id, "user_id": user_public_id, "filename": r.filename,
+            "size": r.size, "is_deleted": r.is_deleted,
+            "created_at": r.created_at.isoformat() if r.created_at else None}
+
+
+async def get_or_create_settings(s, user_db_id: int) -> Settings:
+    st = (await s.execute(select(Settings).where(Settings.user_id == user_db_id))).scalar_one_or_none()
+    if not st:
+        st = Settings(user_id=user_db_id, onboarded=False, active_bankroll_id=None)
+        s.add(st)
+        await s.flush()
+    return st
+
+
+async def ensure_bankrolls(s, user_db_id: int) -> Bankroll:
+    """Ensure the user has >=1 bankroll and return the active one."""
+    st = await get_or_create_settings(s, user_db_id)
+    count = (await s.execute(
+        select(func.count(Bankroll.id)).where(Bankroll.user_id == user_db_id))).scalar_one()
     if count == 0:
-        br_id = f"br_{uuid.uuid4().hex[:12]}"
-        doc = {"bankroll_id": br_id, "user_id": user_id, "name": "Fő bankroll",
-               "starting_bankroll": s.get("starting_bankroll", DEFAULT_BANKROLL["starting_bankroll"]),
-               "currency": s.get("currency", DEFAULT_BANKROLL["currency"]),
-               "unit_size": s.get("unit_size", DEFAULT_BANKROLL["unit_size"]),
-               "profit_goal": s.get("profit_goal", DEFAULT_BANKROLL["profit_goal"]),
-               "daily_limit": s.get("daily_limit", DEFAULT_BANKROLL["daily_limit"]),
-               "weekly_limit": s.get("weekly_limit", DEFAULT_BANKROLL["weekly_limit"]),
-               "created_at": datetime.now(timezone.utc).isoformat()}
-        await db.bankrolls.insert_one(dict(doc))
-        await db.bets.update_many({"user_id": user_id, "bankroll_id": {"$exists": False}},
-                                  {"$set": {"bankroll_id": br_id}})
-        await db.settings.update_one({"user_id": user_id}, {"$set": {"active_bankroll_id": br_id}})
-        s["active_bankroll_id"] = br_id
-    active_id = s.get("active_bankroll_id")
+        br = Bankroll(public_id=f"br_{uuid.uuid4().hex[:12]}", user_id=user_db_id,
+                      name="Fő bankroll", **DEFAULT_BANKROLL)
+        s.add(br)
+        await s.flush()
+        st.active_bankroll_id = br.id
+        await s.flush()
+        return br
     active = None
-    if active_id:
-        active = await db.bankrolls.find_one({"user_id": user_id, "bankroll_id": active_id}, {"_id": 0})
+    if st.active_bankroll_id:
+        active = (await s.execute(
+            select(Bankroll).where(Bankroll.id == st.active_bankroll_id,
+                                   Bankroll.user_id == user_db_id))).scalar_one_or_none()
     if not active:
-        active = await db.bankrolls.find_one({"user_id": user_id}, {"_id": 0})
-        await db.settings.update_one({"user_id": user_id},
-                                     {"$set": {"active_bankroll_id": active["bankroll_id"]}})
+        active = (await s.execute(
+            select(Bankroll).where(Bankroll.user_id == user_db_id)
+            .order_by(Bankroll.created_at, Bankroll.id).limit(1))).scalar_one()
+        st.active_bankroll_id = active.id
+        await s.flush()
     return active
 
 
@@ -239,28 +280,38 @@ async def ensure_bankrolls(user_id: str) -> dict:
 @api_router.post("/auth/register")
 async def register(input: RegisterInput, response: Response):
     email = input.email.lower()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="Ez az email már regisztrálva van")
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    doc = {"user_id": user_id, "email": email, "name": input.name or email.split("@")[0],
-           "password_hash": hash_password(input.password), "picture": "",
-           "auth_provider": "email", "created_at": datetime.now(timezone.utc).isoformat()}
-    await db.users.insert_one(doc)
-    await ensure_bankrolls(user_id)
-    token = create_access_token(user_id, email)
-    set_auth_cookie(response, "access_token", token, 604800)
-    return {**public_user(doc), "access_token": token}
+    async with SessionLocal() as s:
+        exists = (await s.execute(select(User.id).where(User.email == email))).scalar_one_or_none()
+        if exists:
+            raise HTTPException(status_code=400, detail="Ez az email már regisztrálva van")
+        user = User(public_id=f"user_{uuid.uuid4().hex[:12]}", email=email,
+                    name=input.name or email.split("@")[0],
+                    password_hash=hash_password(input.password), picture="",
+                    auth_provider="email")
+        s.add(user)
+        await s.flush()
+        await ensure_bankrolls(s, user.id)
+        await s.commit()
+        token = create_access_token(user.public_id, email)
+        set_auth_cookie(response, "access_token", token, 604800)
+        return {**public_user(user_row_to_dict(user)), "access_token": token}
 
 
 @api_router.post("/auth/login")
-async def login(input: LoginInput, response: Response):
+async def login(input: LoginInput, request: Request, response: Response):
     email = input.email.lower()
-    user = await db.users.find_one({"email": email})
-    if not user or not user.get("password_hash") or not verify_password(input.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Hibás email vagy jelszó")
-    token = create_access_token(user["user_id"], email)
-    set_auth_cookie(response, "access_token", token, 604800)
-    return {**public_user(user), "access_token": token}
+    rl_key = f"{client_ip(request)}|{email}"
+    if login_rate_limited(rl_key):
+        raise HTTPException(status_code=429, detail="Túl sok sikertelen bejelentkezési próbálkozás. Próbáld újra később.")
+    async with SessionLocal() as s:
+        user = (await s.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if not user or not user.password_hash or not verify_password(input.password, user.password_hash):
+            register_login_failure(rl_key)
+            raise HTTPException(status_code=401, detail="Hibás email vagy jelszó")
+        LOGIN_ATTEMPTS.pop(rl_key, None)
+        token = create_access_token(user.public_id, email)
+        set_auth_cookie(response, "access_token", token, 604800)
+        return {**public_user(user_row_to_dict(user)), "access_token": token}
 
 
 @api_router.get("/auth/me")
@@ -272,7 +323,9 @@ async def me(user: dict = Depends(get_current_user)):
 async def logout(request: Request, response: Response):
     session_token = request.cookies.get("session_token")
     if session_token:
-        await db.user_sessions.delete_one({"session_token": session_token})
+        async with SessionLocal() as s:
+            await s.execute(delete(UserSession).where(UserSession.session_token == session_token))
+            await s.commit()
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("session_token", path="/")
     return {"ok": True}
@@ -365,23 +418,22 @@ async def google_callback(request: Request, code: str = Query(...), state: str =
     if not email:
         return RedirectResponse(url=f"{origin}/belepes?error=google_no_email", status_code=302)
 
-    user = await db.users.find_one({"email": email})
-    if not user:
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        user = {"user_id": user_id, "email": email,
-                "name": info.get("name", ""), "picture": info.get("picture", ""),
-                "auth_provider": "google",
-                "created_at": datetime.now(timezone.utc).isoformat()}
-        await db.users.insert_one(dict(user))
-        await ensure_bankrolls(user_id)
-    else:
-        user_id = user["user_id"]
-        await db.users.update_one({"user_id": user_id}, {"$set": {
-            "picture": info.get("picture", user.get("picture", "")),
-            "name": info.get("name", user.get("name", "")),
-        }})
+    async with SessionLocal() as s:
+        user = (await s.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        if not user:
+            user = User(public_id=f"user_{uuid.uuid4().hex[:12]}", email=email,
+                        name=info.get("name", ""), picture=info.get("picture", ""),
+                        auth_provider="google")
+            s.add(user)
+            await s.flush()
+            await ensure_bankrolls(s, user.id)
+        else:
+            user.picture = info.get("picture", user.picture)
+            user.name = info.get("name", user.name)
+        await s.commit()
+        public_id = user.public_id
 
-    jwt_token = create_access_token(user_id, email)
+    jwt_token = create_access_token(public_id, email)
     redirect = RedirectResponse(url=f"{origin}/?google_token={quote(jwt_token)}", status_code=302)
     redirect.set_cookie(key="access_token", value=jwt_token, httponly=True,
                         secure=COOKIE_SECURE, samesite=COOKIE_SAMESITE,
@@ -389,157 +441,197 @@ async def google_callback(request: Request, code: str = Query(...), state: str =
     return redirect
 
 
-
-
 # ---------------- Settings routes ----------------
 @api_router.get("/settings")
 async def read_settings(user: dict = Depends(get_current_user)):
-    active = await ensure_bankrolls(user["user_id"])
-    s = await db.settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    return {**active, "onboarded": bool(s.get("onboarded")),
-            "active_bankroll_id": active["bankroll_id"]}
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        st = await get_or_create_settings(s, user["id"])
+        payload = {**bankroll_dict(active, user["user_id"]), "onboarded": bool(st.onboarded),
+                   "active_bankroll_id": active.public_id}
+        await s.commit()
+        return payload
 
 
 @api_router.put("/settings")
 async def update_settings(input: SettingsInput, user: dict = Depends(get_current_user)):
-    active = await ensure_bankrolls(user["user_id"])
-    data = input.model_dump()
-    onboarded = data.pop("onboarded", None)
-    br_updates = {k: v for k, v in data.items() if v is not None}
-    if br_updates:
-        await db.bankrolls.update_one(
-            {"user_id": user["user_id"], "bankroll_id": active["bankroll_id"]},
-            {"$set": br_updates})
-    if onboarded is not None:
-        await db.settings.update_one({"user_id": user["user_id"]},
-                                     {"$set": {"onboarded": onboarded}})
-    active = await db.bankrolls.find_one(
-        {"user_id": user["user_id"], "bankroll_id": active["bankroll_id"]}, {"_id": 0})
-    s = await db.settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    return {**active, "onboarded": bool(s.get("onboarded")),
-            "active_bankroll_id": active["bankroll_id"]}
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        st = await get_or_create_settings(s, user["id"])
+        data = input.model_dump()
+        onboarded = data.pop("onboarded", None)
+        for k, v in data.items():
+            if v is not None:
+                setattr(active, k, v)
+        if onboarded is not None:
+            st.onboarded = onboarded
+        await s.flush()
+        payload = {**bankroll_dict(active, user["user_id"]), "onboarded": bool(st.onboarded),
+                   "active_bankroll_id": active.public_id}
+        await s.commit()
+        return payload
 
 
 # ---------------- Bankroll routes ----------------
 @api_router.get("/bankrolls")
 async def list_bankrolls(user: dict = Depends(get_current_user)):
-    active = await ensure_bankrolls(user["user_id"])
-    brs = await db.bankrolls.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", 1).to_list(200)
-    return {"bankrolls": brs, "active_bankroll_id": active["bankroll_id"]}
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        rows = (await s.execute(
+            select(Bankroll).where(Bankroll.user_id == user["id"])
+            .order_by(Bankroll.created_at, Bankroll.id).limit(200))).scalars().all()
+        payload = {"bankrolls": [bankroll_dict(b, user["user_id"]) for b in rows],
+                   "active_bankroll_id": active.public_id}
+        await s.commit()
+        return payload
 
 
 @api_router.post("/bankrolls")
 async def create_bankroll(input: BankrollCreate, user: dict = Depends(get_current_user)):
-    await ensure_bankrolls(user["user_id"])
-    name = (input.name or "").strip() or "Új bankroll"
-    br_id = f"br_{uuid.uuid4().hex[:12]}"
-    doc = {"bankroll_id": br_id, "user_id": user["user_id"], "name": name,
-           "starting_bankroll": input.starting_bankroll, "currency": input.currency,
-           "unit_size": DEFAULT_BANKROLL["unit_size"], "profit_goal": DEFAULT_BANKROLL["profit_goal"],
-           "daily_limit": DEFAULT_BANKROLL["daily_limit"], "weekly_limit": DEFAULT_BANKROLL["weekly_limit"],
-           "created_at": datetime.now(timezone.utc).isoformat()}
-    await db.bankrolls.insert_one(dict(doc))
-    await db.settings.update_one({"user_id": user["user_id"]},
-                                 {"$set": {"active_bankroll_id": br_id}})
-    doc.pop("_id", None)
-    return doc
+    async with SessionLocal() as s:
+        await ensure_bankrolls(s, user["id"])
+        st = await get_or_create_settings(s, user["id"])
+        br = Bankroll(public_id=f"br_{uuid.uuid4().hex[:12]}", user_id=user["id"],
+                      name=(input.name or "").strip() or "Új bankroll",
+                      starting_bankroll=input.starting_bankroll, currency=input.currency,
+                      unit_size=DEFAULT_BANKROLL["unit_size"],
+                      profit_goal=DEFAULT_BANKROLL["profit_goal"],
+                      daily_limit=DEFAULT_BANKROLL["daily_limit"],
+                      weekly_limit=DEFAULT_BANKROLL["weekly_limit"])
+        s.add(br)
+        await s.flush()
+        st.active_bankroll_id = br.id
+        payload = bankroll_dict(br, user["user_id"])
+        await s.commit()
+        return payload
 
 
 @api_router.put("/bankrolls/{bankroll_id}")
 async def update_bankroll(bankroll_id: str, input: BankrollUpdate, user: dict = Depends(get_current_user)):
-    existing = await db.bankrolls.find_one({"user_id": user["user_id"], "bankroll_id": bankroll_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Bankroll nem található")
-    updates = {k: v for k, v in input.model_dump().items() if v is not None}
-    if "name" in updates:
-        updates["name"] = updates["name"].strip() or existing.get("name", "Bankroll")
-    if updates:
-        await db.bankrolls.update_one({"bankroll_id": bankroll_id}, {"$set": updates})
-    return await db.bankrolls.find_one({"bankroll_id": bankroll_id}, {"_id": 0})
+    async with SessionLocal() as s:
+        br = (await s.execute(select(Bankroll).where(
+            Bankroll.public_id == bankroll_id, Bankroll.user_id == user["id"]))).scalar_one_or_none()
+        if not br:
+            raise HTTPException(status_code=404, detail="Bankroll nem található")
+        updates = {k: v for k, v in input.model_dump().items() if v is not None}
+        if "name" in updates:
+            updates["name"] = updates["name"].strip() or br.name
+        for k, v in updates.items():
+            setattr(br, k, v)
+        await s.flush()
+        payload = bankroll_dict(br, user["user_id"])
+        await s.commit()
+        return payload
 
 
 @api_router.delete("/bankrolls/{bankroll_id}")
 async def delete_bankroll(bankroll_id: str, user: dict = Depends(get_current_user)):
-    existing = await db.bankrolls.find_one({"user_id": user["user_id"], "bankroll_id": bankroll_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Bankroll nem található")
-    count = await db.bankrolls.count_documents({"user_id": user["user_id"]})
-    if count <= 1:
-        raise HTTPException(status_code=400, detail="Legalább egy bankroll szükséges")
-    await db.bets.delete_many({"user_id": user["user_id"], "bankroll_id": bankroll_id})
-    await db.bankrolls.delete_one({"bankroll_id": bankroll_id})
-    s = await db.settings.find_one({"user_id": user["user_id"]})
-    if s and s.get("active_bankroll_id") == bankroll_id:
-        other = await db.bankrolls.find_one({"user_id": user["user_id"]}, {"_id": 0})
-        await db.settings.update_one({"user_id": user["user_id"]},
-                                     {"$set": {"active_bankroll_id": other["bankroll_id"]}})
-    return {"ok": True}
+    async with SessionLocal() as s:
+        br = (await s.execute(select(Bankroll).where(
+            Bankroll.public_id == bankroll_id, Bankroll.user_id == user["id"]))).scalar_one_or_none()
+        if not br:
+            raise HTTPException(status_code=404, detail="Bankroll nem található")
+        count = (await s.execute(
+            select(func.count(Bankroll.id)).where(Bankroll.user_id == user["id"]))).scalar_one()
+        if count <= 1:
+            raise HTTPException(status_code=400, detail="Legalább egy bankroll szükséges")
+        st = await get_or_create_settings(s, user["id"])
+        was_active = st.active_bankroll_id == br.id
+        # bets are removed by the FK cascade on bankrolls
+        await s.delete(br)
+        await s.flush()
+        if was_active:
+            other = (await s.execute(
+                select(Bankroll).where(Bankroll.user_id == user["id"])
+                .order_by(Bankroll.created_at, Bankroll.id).limit(1))).scalar_one()
+            st.active_bankroll_id = other.id
+        await s.commit()
+        return {"ok": True}
 
 
 @api_router.post("/bankrolls/{bankroll_id}/activate")
 async def activate_bankroll(bankroll_id: str, user: dict = Depends(get_current_user)):
-    existing = await db.bankrolls.find_one({"user_id": user["user_id"], "bankroll_id": bankroll_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Bankroll nem található")
-    await db.settings.update_one({"user_id": user["user_id"]},
-                                 {"$set": {"active_bankroll_id": bankroll_id}})
-    return {"active_bankroll_id": bankroll_id}
+    async with SessionLocal() as s:
+        br = (await s.execute(select(Bankroll).where(
+            Bankroll.public_id == bankroll_id, Bankroll.user_id == user["id"]))).scalar_one_or_none()
+        if not br:
+            raise HTTPException(status_code=404, detail="Bankroll nem található")
+        st = await get_or_create_settings(s, user["id"])
+        st.active_bankroll_id = br.id
+        await s.commit()
+        return {"active_bankroll_id": bankroll_id}
 
 
 # ---------------- Bets routes ----------------
-def serialize_bet(b: dict) -> dict:
-    b.pop("_id", None)
-    return b
-
 @api_router.get("/bets")
-async def list_bets(user: dict = Depends(get_current_user)):
-    active = await ensure_bankrolls(user["user_id"])
-    bets = await db.bets.find(
-        {"user_id": user["user_id"], "bankroll_id": active["bankroll_id"]},
-        {"_id": 0}).sort("date", -1).to_list(2000)
-    return bets
+async def list_bets(user: dict = Depends(get_current_user),
+                    limit: int = Query(2000, ge=1, le=2000),
+                    offset: int = Query(0, ge=0)):
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        rows = (await s.execute(
+            select(Bet).where(Bet.user_id == user["id"], Bet.bankroll_id == active.id)
+            .order_by(Bet.bet_date.desc(), Bet.id.desc())
+            .limit(limit).offset(offset))).scalars().all()
+        payload = [bet_dict(b, user["user_id"], active.public_id) for b in rows]
+        await s.commit()
+        return payload
 
 
 @api_router.post("/bets")
 async def create_bet(input: BetInput, user: dict = Depends(get_current_user)):
-    active = await ensure_bankrolls(user["user_id"])
-    bet_id = f"bet_{uuid.uuid4().hex[:12]}"
-    date = input.date or datetime.now(timezone.utc).isoformat()
-    profit = compute_profit(input.stake, input.odds, input.result)
-    doc = {"bet_id": bet_id, "user_id": user["user_id"], "bankroll_id": active["bankroll_id"],
-           "date": date, "sport": input.sport,
-           "market": input.market, "selection": input.selection, "stake": input.stake,
-           "odds": input.odds, "units": input.units, "result": input.result,
-           "bookmaker": input.bookmaker, "note": input.note, "profit": profit,
-           "created_at": datetime.now(timezone.utc).isoformat()}
-    await db.bets.insert_one(dict(doc))
-    doc.pop("_id", None)
-    return doc
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        bet = Bet(public_id=f"bet_{uuid.uuid4().hex[:12]}", user_id=user["id"],
+                  bankroll_id=active.id, bet_date=_parse_date_flexible(input.date),
+                  sport=input.sport, market=input.market, selection=input.selection or "",
+                  stake=input.stake, odds=input.odds, units=input.units, result=input.result,
+                  bookmaker=input.bookmaker or "", note=input.note or "",
+                  profit=compute_profit(input.stake, input.odds, input.result))
+        s.add(bet)
+        await s.flush()
+        payload = bet_dict(bet, user["user_id"], active.public_id)
+        await s.commit()
+        return payload
 
 
 @api_router.put("/bets/{bet_id}")
 async def update_bet(bet_id: str, input: BetInput, user: dict = Depends(get_current_user)):
-    existing = await db.bets.find_one({"bet_id": bet_id, "user_id": user["user_id"]})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Fogadás nem található")
-    profit = compute_profit(input.stake, input.odds, input.result)
-    updates = input.model_dump()
-    updates["profit"] = profit
-    if not updates.get("date"):
-        updates["date"] = existing["date"]
-    await db.bets.update_one({"bet_id": bet_id}, {"$set": updates})
-    return await db.bets.find_one({"bet_id": bet_id}, {"_id": 0})
+    async with SessionLocal() as s:
+        row = (await s.execute(
+            select(Bet, Bankroll.public_id).join(Bankroll, Bankroll.id == Bet.bankroll_id)
+            .where(Bet.public_id == bet_id, Bet.user_id == user["id"]))).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Fogadás nem található")
+        bet, br_public_id = row
+        data = input.model_dump()
+        date_raw = data.pop("date", None)
+        if date_raw:
+            bet.bet_date = _parse_date_flexible(date_raw)
+        for k, v in data.items():
+            setattr(bet, k, v if v is not None else getattr(bet, k))
+        bet.selection = input.selection or ""
+        bet.bookmaker = input.bookmaker or ""
+        bet.note = input.note or ""
+        bet.units = input.units
+        bet.profit = compute_profit(input.stake, input.odds, input.result)
+        await s.flush()
+        payload = bet_dict(bet, user["user_id"], br_public_id)
+        await s.commit()
+        return payload
 
 
 @api_router.delete("/bets/{bet_id}")
 async def delete_bet(bet_id: str, user: dict = Depends(get_current_user)):
-    res = await db.bets.delete_one({"bet_id": bet_id, "user_id": user["user_id"]})
-    if res.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Fogadás nem található")
-    return {"ok": True}
+    async with SessionLocal() as s:
+        res = await s.execute(delete(Bet).where(Bet.public_id == bet_id, Bet.user_id == user["id"]))
+        await s.commit()
+        if res.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Fogadás nem található")
+        return {"ok": True}
 
 
-# ---------------- Import & Image ----------------
+# ---------------- Import ----------------
 RESULT_ALIASES = {
     "nyert": "win", "win": "win", "won": "win",
     "vesztett": "lose", "veszített": "lose", "lose": "lose", "lost": "lose",
@@ -568,28 +660,27 @@ def _to_float(s):
     return float(s)
 
 
-def _parse_date_flexible(raw):
+def _parse_date_flexible(raw) -> datetime:
     raw = (raw or "").strip()
     if not raw:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(timezone.utc)
     try:
         d = datetime.fromisoformat(raw)
         if d.tzinfo is None:
             d = d.replace(tzinfo=timezone.utc)
-        return d.isoformat()
+        return d
     except Exception:
         pass
     for fmt in ("%Y. %m. %d.", "%Y.%m.%d.", "%Y-%m-%d", "%Y.%m.%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y"):
         try:
-            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc).isoformat()
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
         except Exception:
             continue
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc)
 
 
 @api_router.post("/bets/import")
 async def import_bets(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    active = await ensure_bankrolls(user["user_id"])
     content = (await file.read()).decode("utf-8-sig", errors="ignore")
     reader = csv.DictReader(io.StringIO(content, newline=""))
     if not reader.fieldnames:
@@ -602,29 +693,29 @@ async def import_bets(file: UploadFile = File(...), user: dict = Depends(get_cur
                 return (row.get(h) or "").strip()
         return ""
 
-    docs, errors = [], 0
-    for row in reader:
-        try:
-            stake = _to_float(find(row, "stake"))
-            odds = _to_float(find(row, "odds"))
-        except Exception:
-            errors += 1
-            continue
-        result = RESULT_ALIASES.get(find(row, "result").lower(), "pending")
-        docs.append({
-            "bet_id": f"bet_{uuid.uuid4().hex[:12]}", "user_id": user["user_id"],
-            "bankroll_id": active["bankroll_id"],
-            "date": _parse_date_flexible(find(row, "date")),
-            "sport": find(row, "sport") or "Egyéb",
-            "market": find(row, "market") or "Meccs kimenetel",
-            "selection": find(row, "selection"), "stake": stake, "odds": odds,
-            "units": None, "result": result, "bookmaker": find(row, "bookmaker"),
-            "note": find(row, "note"), "profit": compute_profit(stake, odds, result),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-    if docs:
-        await db.bets.insert_many([dict(d) for d in docs])
-    return {"imported": len(docs), "errors": errors}
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        imported, errors = 0, 0
+        for row in reader:
+            try:
+                stake = _to_float(find(row, "stake"))
+                odds = _to_float(find(row, "odds"))
+            except Exception:
+                errors += 1
+                continue
+            result = RESULT_ALIASES.get(find(row, "result").lower(), "pending")
+            s.add(Bet(public_id=f"bet_{uuid.uuid4().hex[:12]}", user_id=user["id"],
+                      bankroll_id=active.id, bet_date=_parse_date_flexible(find(row, "date")),
+                      sport=find(row, "sport") or "Egyéb",
+                      market=find(row, "market") or "Meccs kimenetel",
+                      selection=find(row, "selection"), stake=stake, odds=odds, units=None,
+                      result=result, bookmaker=find(row, "bookmaker"), note=find(row, "note"),
+                      profit=compute_profit(stake, odds, result)))
+            imported += 1
+            if imported % 500 == 0:
+                await s.flush()
+        await s.commit()
+    return {"imported": imported, "errors": errors}
 
 
 # ---------------- Analytics ----------------
@@ -638,21 +729,22 @@ def _parse_dt(s):
         return None
 
 
-def _filter_by_range(bets, start_date, end_date):
-    if not start_date and not end_date:
-        return bets
+async def _load_bets(s, user_db_id: int, bankroll_db_id: int, bankroll_public_id: str,
+                     user_public_id: str, start_date=None, end_date=None,
+                     newest_first=False, limit=5000) -> List[dict]:
+    """Server-side filtered/sorted fetch; streams rows in chunks instead of one big list."""
+    stmt = select(Bet).where(Bet.user_id == user_db_id, Bet.bankroll_id == bankroll_db_id)
     sd = _parse_dt(start_date) if start_date else None
     ed = _parse_dt(end_date) if end_date else None
+    if sd:
+        stmt = stmt.where(Bet.bet_date >= sd)
+    if ed:
+        stmt = stmt.where(Bet.bet_date <= ed)
+    stmt = stmt.order_by(Bet.bet_date.desc() if newest_first else Bet.bet_date).limit(limit)
     out = []
-    for b in bets:
-        bd = _parse_dt(b.get("date", ""))
-        if bd is None:
-            continue
-        if sd and bd < sd:
-            continue
-        if ed and bd > ed:
-            continue
-        out.append(b)
+    result = await s.stream_scalars(stmt.execution_options(yield_per=500))
+    async for b in result:
+        out.append(bet_dict(b, user_public_id, bankroll_public_id))
     return out
 
 
@@ -660,11 +752,13 @@ def _filter_by_range(bets, start_date, end_date):
 async def analytics(user: dict = Depends(get_current_user),
                     start_date: Optional[str] = Query(None),
                     end_date: Optional[str] = Query(None)):
-    settings = await ensure_bankrolls(user["user_id"])
-    bets = await db.bets.find(
-        {"user_id": user["user_id"], "bankroll_id": settings["bankroll_id"]},
-        {"_id": 0}).sort("date", 1).to_list(5000)
-    bets = _filter_by_range(bets, start_date, end_date)
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        bets = await _load_bets(s, user["id"], active.id, active.public_id, user["user_id"],
+                                start_date, end_date)
+        settings = bankroll_dict(active, user["user_id"])
+        await s.commit()
+
     settled = [b for b in bets if b["result"] not in ("pending",)]
 
     total_staked = sum(b["stake"] for b in settled)
@@ -746,29 +840,24 @@ async def analytics(user: dict = Depends(get_current_user),
 
 @api_router.get("/limits/status")
 async def limits_status(user: dict = Depends(get_current_user)):
-    settings = await ensure_bankrolls(user["user_id"])
     now = datetime.now(timezone.utc)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = day_start - timedelta(days=now.weekday())
-    bets = await db.bets.find(
-        {"user_id": user["user_id"], "bankroll_id": settings["bankroll_id"]},
-        {"_id": 0}).to_list(5000)
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        settings = bankroll_dict(active, user["user_id"])
 
-    def staked_since(dt):
-        total = 0
-        for b in bets:
-            try:
-                bd = datetime.fromisoformat(b["date"])
-                if bd.tzinfo is None:
-                    bd = bd.replace(tzinfo=timezone.utc)
-                if bd >= dt:
-                    total += b["stake"]
-            except Exception:
-                pass
-        return total
+        async def staked_since(dt):
+            total = (await s.execute(
+                select(func.coalesce(func.sum(Bet.stake), 0)).where(
+                    Bet.user_id == user["id"], Bet.bankroll_id == active.id,
+                    Bet.bet_date >= dt))).scalar_one()
+            return float(total or 0)
 
-    daily = staked_since(day_start)
-    weekly = staked_since(week_start)
+        daily = await staked_since(day_start)
+        weekly = await staked_since(week_start)
+        await s.commit()
+
     dl = settings.get("daily_limit", 0) or 0
     wl = settings.get("weekly_limit", 0) or 0
     daily_pct = round(daily / dl * 100, 1) if dl else 0
@@ -787,10 +876,11 @@ async def limits_status(user: dict = Depends(get_current_user)):
 # ---------------- Export ----------------
 @api_router.get("/export/csv")
 async def export_csv(user: dict = Depends(get_current_user)):
-    active = await ensure_bankrolls(user["user_id"])
-    bets = await db.bets.find(
-        {"user_id": user["user_id"], "bankroll_id": active["bankroll_id"]},
-        {"_id": 0}).sort("date", -1).to_list(5000)
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        bets = await _load_bets(s, user["id"], active.id, active.public_id, user["user_id"],
+                                newest_first=True)
+        await s.commit()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Dátum", "Sport", "Piac", "Tipp", "Tét", "Odds", "Eredmény", "Profit", "Fogadóiroda", "Jegyzet"])
@@ -870,115 +960,61 @@ def build_report_pdf(user_name, analytics_data, bets, currency) -> bytes:
 
 @api_router.post("/reports/pdf")
 async def create_report(user: dict = Depends(get_current_user)):
-    import base64
-    active = await ensure_bankrolls(user["user_id"])
-    currency = active.get("currency", "HUF")
-    bets = await db.bets.find(
-        {"user_id": user["user_id"], "bankroll_id": active["bankroll_id"]},
-        {"_id": 0}).sort("date", -1).to_list(5000)
     analytics_data = await analytics(user)
-    pdf_bytes = build_report_pdf(user.get("name") or user.get("email"), analytics_data, bets, currency)
-
-    report_id = f"rep_{uuid.uuid4().hex[:12]}"
-    ts = datetime.now(timezone.utc)
-    filename = f"jelentes_{ts.strftime('%Y%m%d_%H%M')}.pdf"
-    doc = {"report_id": report_id, "user_id": user["user_id"],
-           "pdf_base64": base64.b64encode(pdf_bytes).decode("utf-8"),
-           "filename": filename, "size": len(pdf_bytes),
-           "is_deleted": False, "created_at": ts.isoformat()}
-    await db.reports.insert_one(dict(doc))
-    return {"report_id": report_id, "user_id": user["user_id"], "filename": filename,
-            "size": len(pdf_bytes), "is_deleted": False, "created_at": ts.isoformat()}
+    async with SessionLocal() as s:
+        active = await ensure_bankrolls(s, user["id"])
+        currency = active.currency or "HUF"
+        bets = await _load_bets(s, user["id"], active.id, active.public_id, user["user_id"],
+                                newest_first=True, limit=200)
+        pdf_bytes = build_report_pdf(user.get("name") or user.get("email"), analytics_data, bets, currency)
+        ts = datetime.now(timezone.utc)
+        rep = Report(public_id=f"rep_{uuid.uuid4().hex[:12]}", user_id=user["id"],
+                     filename=f"jelentes_{ts.strftime('%Y%m%d_%H%M')}.pdf",
+                     size=len(pdf_bytes), pdf_data=pdf_bytes, is_deleted=False)
+        s.add(rep)
+        await s.flush()
+        payload = report_dict(rep, user["user_id"])
+        await s.commit()
+        return payload
 
 
 @api_router.get("/reports")
-async def list_reports(user: dict = Depends(get_current_user)):
-    reports = await db.reports.find(
-        {"user_id": user["user_id"], "is_deleted": False}, {"_id": 0, "pdf_base64": 0}
-    ).sort("created_at", -1).to_list(1000)
-    return reports
+async def list_reports(user: dict = Depends(get_current_user),
+                       limit: int = Query(1000, ge=1, le=1000),
+                       offset: int = Query(0, ge=0)):
+    async with SessionLocal() as s:
+        rows = (await s.execute(
+            select(Report.public_id, Report.filename, Report.size, Report.is_deleted, Report.created_at)
+            .where(Report.user_id == user["id"], Report.is_deleted.is_(False))
+            .order_by(Report.created_at.desc(), Report.id.desc())
+            .limit(limit).offset(offset))).all()
+        return [{"report_id": r.public_id, "user_id": user["user_id"], "filename": r.filename,
+                 "size": r.size, "is_deleted": r.is_deleted,
+                 "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
 @api_router.get("/reports/{report_id}/download")
 async def download_report(report_id: str, user: dict = Depends(get_current_user)):
-    import base64
-    record = await db.reports.find_one(
-        {"report_id": report_id, "user_id": user["user_id"], "is_deleted": False})
-    if not record or not record.get("pdf_base64"):
-        raise HTTPException(status_code=404, detail="Jelentés nem található")
-    data = base64.b64decode(record["pdf_base64"])
-    return Response(content=data, media_type="application/pdf",
-                    headers={"Content-Disposition": f"attachment; filename={record['filename']}"})
+    async with SessionLocal() as s:
+        row = (await s.execute(
+            select(Report.pdf_data, Report.filename).where(
+                Report.public_id == report_id, Report.user_id == user["id"],
+                Report.is_deleted.is_(False)))).first()
+        if not row or not row.pdf_data:
+            raise HTTPException(status_code=404, detail="Jelentés nem található")
+        return Response(content=bytes(row.pdf_data), media_type="application/pdf",
+                        headers={"Content-Disposition": f"attachment; filename={row.filename}"})
 
 
 @api_router.delete("/reports/{report_id}")
 async def delete_report(report_id: str, user: dict = Depends(get_current_user)):
-    res = await db.reports.update_one(
-        {"report_id": report_id, "user_id": user["user_id"]}, {"$set": {"is_deleted": True}})
-    if res.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Jelentés nem található")
-    return {"ok": True}
-
-
-# ---------------- Odds ----------------
-DEMO_SPORTS = [
-    {"key": "soccer_epl", "title": "Angol Premier League", "group": "Labdarúgás"},
-    {"key": "soccer_uefa_champs_league", "title": "Bajnokok Ligája", "group": "Labdarúgás"},
-    {"key": "basketball_nba", "title": "NBA", "group": "Kosárlabda"},
-    {"key": "tennis_atp", "title": "ATP Tenisz", "group": "Tenisz"},
-]
-
-def demo_odds(sport):
-    base = datetime.now(timezone.utc)
-    games = [
-        ("Arsenal", "Chelsea", 1.95, 3.60, 3.80),
-        ("Liverpool", "Man City", 2.40, 3.30, 2.90),
-        ("Real Madrid", "Barcelona", 2.10, 3.50, 3.40),
-        ("Bayern", "Dortmund", 1.70, 4.00, 4.50),
-    ]
-    out = []
-    for i, (h, a, oh, od, oa) in enumerate(games):
-        out.append({
-            "id": f"demo_{i}", "sport_key": sport, "sport_title": sport,
-            "commence_time": (base + timedelta(hours=6 + i * 3)).isoformat(),
-            "home_team": h, "away_team": a,
-            "bookmakers": [{"key": "demo", "title": "Demo Iroda", "markets": [
-                {"key": "h2h", "outcomes": [
-                    {"name": h, "price": oh}, {"name": "Döntetlen", "price": od}, {"name": a, "price": oa}]}]}],
-        })
-    return out
-
-
-@api_router.get("/odds/sports")
-async def odds_sports(user: dict = Depends(get_current_user)):
-    if not ODDS_API_KEY:
-        return {"data": DEMO_SPORTS, "demo": True}
-    try:
-        async with httpx.AsyncClient(timeout=20) as hc:
-            r = await hc.get(f"{ODDS_API_BASE}/sports", params={"apiKey": ODDS_API_KEY})
-        if r.status_code != 200:
-            return {"data": DEMO_SPORTS, "demo": True}
-        data = [s for s in r.json() if s.get("active")]
-        return {"data": data, "demo": False}
-    except Exception:
-        return {"data": DEMO_SPORTS, "demo": True}
-
-
-@api_router.get("/odds/{sport}")
-async def odds_for_sport(sport: str, user: dict = Depends(get_current_user)):
-    if not ODDS_API_KEY:
-        return {"data": demo_odds(sport), "demo": True}
-    try:
-        async with httpx.AsyncClient(timeout=20) as hc:
-            r = await hc.get(f"{ODDS_API_BASE}/sports/{sport}/odds",
-                             params={"apiKey": ODDS_API_KEY, "regions": "eu",
-                                     "markets": "h2h", "oddsFormat": "decimal", "dateFormat": "iso"})
-        if r.status_code != 200:
-            return {"data": demo_odds(sport), "demo": True}
-        return {"data": r.json(), "demo": False,
-                "remaining": r.headers.get("x-requests-remaining")}
-    except Exception:
-        return {"data": demo_odds(sport), "demo": True}
+    async with SessionLocal() as s:
+        res = await s.execute(update(Report).where(
+            Report.public_id == report_id, Report.user_id == user["id"]).values(is_deleted=True))
+        await s.commit()
+        if res.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Jelentés nem található")
+        return {"ok": True}
 
 
 @api_router.get("/")
@@ -988,11 +1024,14 @@ async def root():
 
 app.include_router(api_router)
 
+CORS_ORIGINS = [o.strip() for o in os.environ.get('CORS_ORIGINS', '').split(',') if o.strip() and o.strip() != '*']
+if not CORS_ORIGINS:
+    raise RuntimeError("CORS_ORIGINS environment variable is required (explicit origins only, '*' is not allowed)")
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=[o.strip() for o in os.environ.get('CORS_ORIGINS', '*').split(',')],
-    allow_origin_regex=r"https://([a-z0-9-]+\.)*(web\.app|firebaseapp\.com|netlify\.app|vercel\.app)",
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1000,26 +1039,26 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("user_id")
-    await db.bets.create_index("user_id")
-    await db.bets.create_index("bankroll_id")
-    await db.bankrolls.create_index("user_id")
-    await db.user_sessions.create_index("session_token")
+    if os.environ.get("RUN_MIGRATIONS_ON_STARTUP", "true").lower() == "true":
+        import asyncio
+        await asyncio.to_thread(run_migrations)
     # seed admin
     admin_email = os.environ.get("ADMIN_EMAIL")
     admin_password = os.environ.get("ADMIN_PASSWORD")
     if admin_email and admin_password:
-        existing = await db.users.find_one({"email": admin_email})
-        if not existing:
-            uid = f"user_{uuid.uuid4().hex[:12]}"
-            await db.users.insert_one({"user_id": uid, "email": admin_email,
-                                       "name": "Admin", "password_hash": hash_password(admin_password),
-                                       "picture": "", "auth_provider": "email",
-                                       "created_at": datetime.now(timezone.utc).isoformat()})
-            await ensure_bankrolls(uid)
+        async with SessionLocal() as s:
+            existing = (await s.execute(
+                select(User).where(User.email == admin_email.lower()))).scalar_one_or_none()
+            if not existing:
+                admin = User(public_id=f"user_{uuid.uuid4().hex[:12]}", email=admin_email.lower(),
+                             name="Admin", password_hash=hash_password(admin_password),
+                             picture="", auth_provider="email")
+                s.add(admin)
+                await s.flush()
+                await ensure_bankrolls(s, admin.id)
+                await s.commit()
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    client.close()
+    await engine.dispose()

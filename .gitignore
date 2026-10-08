@@ -79,22 +79,25 @@ agenthub/agents/youtube/db
 memory/test_credentials.md
 
 # Mobile development
-android-sdk/frontend/node_modules/.cache/default-development/2.pack
-frontend/node_modules/.cache/default-development/4.pack
-frontend/node_modules/.cache/default-development/2.pack
-frontend/node_modules/.cache/default-development/5.pack
+android-sdk/
+
+# overlay black-box crash/user-report dumps — session data, never history
+**/.emergent/recordings/
+frontend/node_modules/.cache/default-development/0.pack
+frontend/node_modules/.cache/default-development/1.pack
+
+# env files (never commit credentials)
+.env
+.env.local
+*/.env
+backend/.env
+frontend/.env
+!*.env.example
+
+# local postgres data dir (preview container)
+.pgdata/
+.env.*
+*.env
 credentials.json
 *.key
 .credentials
-frontend/node_modules/.cache/default-development/7.pack
-frontend/node_modules/.cache/default-development/11.pack
-frontend/node_modules/.cache/default-development/12.pack
-.env
-.env.*
-*.env
-frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/1.pack
-frontend/node_modules/.cache/default-development/3.pack
-
-# Local backup clones (not for Github)
-clones/

@@ -19,14 +19,12 @@ Az első deploy után az összes `/api/*` **500 hibát** dob, ha az env változ�
 
 | Név | Érték | Kritikus |
 |-----|-------|----------|
-| `MONGO_URL` | MongoDB Atlas connection string | 🔴 KELL |
-| `DB_NAME` | `bettracker` | 🔴 KELL |
+| `DATABASE_URL` | PostgreSQL connection string (`postgresql+asyncpg://...`) | 🔴 KELL |
 | `JWT_SECRET` | 64 karakteres random string | 🔴 KELL |
 | `ADMIN_EMAIL` | `admin@bettracker.pro` | 🟡 admin seedhez |
 | `ADMIN_PASSWORD` | `admin123` | 🟡 admin seedhez |
 | `COOKIE_SECURE` | `true` | 🟢 default true |
 | `COOKIE_SAMESITE` | `lax` | 🟢 default lax |
-| `ODDS_API_KEY` | the-odds-api kulcsod | 🟢 opcionális |
 | `CORS_ORIGINS` | Vercel URL vagy `*` | 🟢 default `*` |
 
 **Google Sign-In opcionális env változói** (csak ha akarod):

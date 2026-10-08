@@ -3,7 +3,7 @@
 > A Firebase Hosting CSAK a React frontendet szolgálja ki.
 > A FastAPI backend + MongoDB máshol fut (pl. Emergent Deploy / Cloud Run / Railway),
 > és a frontend a `REACT_APP_BACKEND_URL`-en keresztül hívja azt.
-> Így MINDEN funkció megmarad (auth, odds, felhő PDF, kép-felismerés).
+> Így MINDEN funkció megmarad (auth, felhő PDF, kép-felismerés).
 
 ## 0) Előfeltétel: legyen egy publikus backend URL
 A backendednek futnia kell egy elérhető HTTPS címen. Legegyszerűbb: Emergent felület → **Deploy**.

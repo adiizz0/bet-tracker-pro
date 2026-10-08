@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   ListChecks,
   BarChart3,
-  Radio,
   Settings as SettingsIcon,
   LogOut,
   TrendingUp,
@@ -19,7 +18,6 @@ const NAV = [
   { to: "/", label: "Vezérlőpult", icon: LayoutDashboard, end: true, id: "dashboard" },
   { to: "/fogadasok", label: "Fogadások", icon: ListChecks, id: "bets" },
   { to: "/elemzes", label: "Elemzés", icon: BarChart3, id: "analytics" },
-  { to: "/elo-szorzok", label: "Élő Szorzók", icon: Radio, id: "odds" },
   { to: "/beallitasok", label: "Beállítások", icon: SettingsIcon, id: "settings" },
 ];
 

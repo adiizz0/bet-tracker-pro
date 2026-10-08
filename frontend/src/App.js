@@ -12,7 +12,6 @@ import Onboarding from "@/pages/Onboarding";
 import Dashboard from "@/pages/Dashboard";
 import Bets from "@/pages/Bets";
 import Analytics from "@/pages/Analytics";
-import LiveOdds from "@/pages/LiveOdds";
 import Settings from "@/pages/Settings";
 import { Loader2 } from "lucide-react";
 
@@ -69,7 +68,6 @@ function AppRouter() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/fogadasok" element={<Bets />} />
         <Route path="/elemzes" element={<Analytics />} />
-        <Route path="/elo-szorzok" element={<LiveOdds />} />
         <Route path="/beallitasok" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

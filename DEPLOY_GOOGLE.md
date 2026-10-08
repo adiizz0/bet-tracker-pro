@@ -31,7 +31,7 @@ gcloud run deploy bettracker-api \
   --source . \
   --region europe-west1 \
   --allow-unauthenticated \
-  --set-env-vars "DB_NAME=bettracker,JWT_SECRET=CSERELD_LE_EGY_HOSSZU_TITKOSRA,ODDS_API_KEY=707d626d086077945c45a2aca1b9da1e,EMERGENT_LLM_KEY=sk-emergent-e2979869f61C9Fe997,ADMIN_EMAIL=admin@bettracker.pro,ADMIN_PASSWORD=valami-eros-jelszo,CORS_ORIGINS=https://A-TE-PROJEKTED.web.app" \
+  --set-env-vars "DB_NAME=bettracker,JWT_SECRET=CSERELD_LE_EGY_HOSSZU_TITKOSRA,EMERGENT_LLM_KEY=sk-emergent-e2979869f61C9Fe997,ADMIN_EMAIL=admin@bettracker.pro,ADMIN_PASSWORD=valami-eros-jelszo,CORS_ORIGINS=https://A-TE-PROJEKTED.web.app" \
   --set-env-vars "^@^MONGO_URL=mongodb+srv://USER:PASS@cluster0.xxxx.mongodb.net/?retryWrites=true&w=majority"
 ```
 > A `^@^` szeparátor azért kell, mert a MONGO_URL vesszőt tartalmazhat.
@@ -55,7 +55,7 @@ firebase deploy --only hosting
 Végén kapsz egy URL-t: `https://A-TE-PROJEKTED.web.app` — itt fut az egész app.
 
 ## 4) Ellenőrzés
-Nyisd meg a Firebase URL-t → regisztráció/belépés → Vezérlőpult → fogadás rögzítés → élő odds → kép beolvasás → felhő PDF. Minden a te Google-infrastruktúrádon fut.
+Nyisd meg a Firebase URL-t → regisztráció/belépés → Vezérlőpult → fogadás rögzítés → kép beolvasás → felhő PDF. Minden a te Google-infrastruktúrádon fut.
 
 ---
 

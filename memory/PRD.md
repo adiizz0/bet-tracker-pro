@@ -1,45 +1,57 @@
-# Bet Tracker Pro — Vercel Deploy Setup
+# Bet Tracker Pro — PRD / állapot
 
-## Problem statement
-Meglévő `github.com/adiizz0/bet-tracker-pro` repót előkészíteni teljes Vercel deployhoz — frontend és FastAPI backend **egy Vercel projektben**, MongoDB Atlas külső adatbázissal.
+## Eredeti kérés
+Az `adiizz0/bet-tracker-pro` repó top 5 biztonsági hibájának javítása — funkció-változtatás,
+refaktor és új feature NÉLKÜL. Felhasználó nyelve: magyar.
 
-## Architektúra
-```
-Vercel Project (Services)
-├── frontend service   → React (frontend/, framework: create-react-app)
-└── backend  service   → FastAPI (backend/server.py, framework: fastapi, entrypoint: server:app)
-        └──> MongoDB Atlas (Vercel Marketplace-en át provisionálva)
-```
+## Stack
+React 19 (CRA+Craco, Tailwind/shadcn) + FastAPI (`backend/server.py`, /api prefix) + MongoDB (motor).
+JWT (HS256) + bcrypt auth, opcionális Google OAuth. ODDS API integráció (the-odds-api.com).
 
-## Elkészült komponensek (2026-01, második iteráció)
-1. **Repo 2 klón**: `/app/clones/bet-tracker-pro-1` és `/app/clones/bet-tracker-pro-2` — mindkettőben azonos állapot, 2 commit
-2. **`vercel.json`** — új **Services** formátum (`services` + `rewrites` `type: service`), ahogy a Vercel dashboard javasolja monorepo felismeréskor
-3. **`backend/requirements.txt`** — 127-ről 13 csomagra csökkentve (serverless bundle méret miatt): fastapi, motor, pymongo, bcrypt, PyJWT, reportlab, httpx, requests, pydantic, email-validator, python-multipart, python-dotenv, starlette
-4. **`backend/.python-version`** = `3.12`
-5. **`DEPLOY_VERCEL.md`** — átírva az új Services architektúrához
-6. **Törölve**: `api/index.py`, root `requirements.txt`, root `.python-version` (nem kellenek Services módban)
+## Elvégezve (2026-06)
+- GitHub repó (main) behúzva a /app-ba (backend + frontend + deploy configok), preview-ban fut.
+- JWT_SECRET: kötelező env, fallback törölve → import-time RuntimeError, ha hiányzik.
+- CORS: `*` és a széles `allow_origin_regex` (vercel/netlify/web.app) törölve; csak explicit
+  `CORS_ORIGINS` env lista engedélyezett, hiányzó érték esetén RuntimeError.
+- Login rate limit: in-memory, IP+email kulcs, 5 próba / 15 perc (LOGIN_MAX_ATTEMPTS,
+  LOGIN_WINDOW_SECONDS env-ből), sikeres belépés nullázza → 429 + magyar hibaüzenet.
+- docker-compose.yml: default `admin123` ADMIN_PASSWORD és a placeholder JWT_SECRET kivéve,
+  `${...}` env-referenciák lettek; CORS_ORIGINS is env-ből.
+- Backend .env: CORS_ORIGINS, JWT_SECRET, ADMIN_EMAIL/ADMIN_PASSWORD, rate-limit paraméterek.
 
-## Env változók, amiket a user Vercel Dashboard-on beállít
-- `MONGO_URL` (a `MONGODB_URI` másolataként, az Atlas Marketplace integráció után)
-- `DB_NAME` = `bettracker`
-- `JWT_SECRET` (előre generált: `JApHbcqIb_lfcvWI4y0WowSYpvKPIgUQbXc3nO_AvrJ28Yz5Rs-OHtsvhTxY2ZEdNcm_pY5CnXRDujfPlxn_1w`)
-- `ODDS_API_KEY` (user birtokolja)
-- `CORS_ORIGINS` = Vercel deploy URL
-- `ADMIN_EMAIL` = `admin@bettracker.pro`, `ADMIN_PASSWORD` = `admin123` (első login után csere)
-- `COOKIE_SECURE=true`, `COOKIE_SAMESITE=lax`
+## Live Odds eltávolítása (2026-06)A teljes "Élő Szorzók" (Live Odds) funkció kikerült a projektből, user kérésére:
+- Backend: `/api/odds/sports` és `/api/odds/{sport}` endpointok, `DEMO_SPORTS`, `demo_odds()`,
+  `ODDS_API_KEY` / `ODDS_API_BASE` config törölve (httpx megmarad a Google OAuth-hoz).
+- Frontend: `pages/LiveOdds.jsx` törölve, App.js route + import, Layout nav item (`Radio` ikon) törölve.
+- Config/doc: docker-compose ODDS env-ek, README / DEPLOY_VERCEL / DEPLOY_GOOGLE / DEPLOY_FIREBASE
+  odds-hivatkozásai törölve. `backend/tests/test_bettracker.py` `TestOdds` osztály törölve.
+- A fogadások `odds` (szorzó) mezője, profit-számítás, statisztikák, bankroll, auth változatlan.
 
-## Amit a user csinál (mi nem tettünk meg, mert nem volt megbízás rá)
-- `git push` a saját fork-jára / GitHub-ra
-- Vercel projekt Import (Framework: Other, Root Directory: `.`)
-- MongoDB Atlas Marketplace integráció aktiválása
-- Env változók bevitele Vercel dashboardra
-- Redeploy → verifikáció
+## Backlog (P1/P2)
+- Google OAuth callback token a query stringben (napló-szivárgás) → cookie/fragment.
+- PDF riportok base64-ben a Mongóban → object storage.
+- Rate limit perzisztens tárolóban (Mongo/Redis), ha több backend instance lesz.
 
-## Nyitott (későbbi iteráció)
-- Custom domain hozzáadása (`*.vercel.app` egyelőre elég)
-- Admin jelszó csere UI-ból (jelenleg csak env vagy DB módosítás)
-- Cold start optimalizáció (motor connection reuse, ha kellene)
-
-## Nem érintettük a kódbázist
-- `backend/server.py` érintetlen — a `startup` event automatikusan létrehozza az indexeket és beszúrja az admin usert, ez idempotens és serverless-kompatibilis
-- Frontend kód érintetlen — `REACT_APP_BACKEND_URL=""` esetén az `api.js` same-origin `/api` hívásokat használ, ami épp a Vercel setup
+## MongoDB -> PostgreSQL migráció (2026-06)
+Stack: FastAPI + SQLAlchemy 2.1 (async) + asyncpg + Alembic + PostgreSQL.
+- `backend/db.py`: async engine + connection pool (DB_POOL_SIZE/MAX_OVERFLOW/RECYCLE env), `SessionLocal`,
+  `run_migrations()` (alembic upgrade head, startupkor `RUN_MIGRATIONS_ON_STARTUP=true` mellett).
+- `backend/models.py`: normalizált schema — surrogate BIGSERIAL PK + `public_id` business key
+  (user_/br_/bet_/rep_ prefix, így az API contract nem változott).
+  users, user_sessions, bankrolls, settings (1:1 user, active_bankroll_id FK SET NULL),
+  bets (FK users+bankrolls ON DELETE CASCADE, CHECK a result értékekre), reports (pdf_data BYTEA).
+  created_at/updated_at minden fő táblán; indexek: bets(user_id,bankroll_id,bet_date),
+  bets(bankroll_id), bankrolls(user_id,created_at), reports(user_id,created_at),
+  user_sessions(user_id), user_sessions(expires_at), unique: users.email, *.public_id.
+- `backend/alembic/` + `alembic.ini`: initial migration `163d14bd6f54_initial_schema.py` (async env.py).
+- `server.py`: minden Mongo query SQLAlchemy-re cserélve, user isolation minden query WHERE-jében
+  (user_id), `/bets` és `/reports` server-side `limit`/`offset` paraméterrel (default = korábbi viselkedés),
+  analytics/export `stream_scalars(yield_per=500)`-szal olvas.
+- Mongo eltávolítva: motor/pymongo kivéve a requirements.txt-ből, nincs Mongo kód.
+  (A `backend/.env`-ben a platform által védett MONGO_URL/DB_NAME kulcsok benne maradtak, de nincsenek használva.)
+- Preview: lokális PostgreSQL 15 a konténerben (PGDATA=/app/.pgdata, supervisor program: postgresql).
+  FIGYELEM: Emergent Deploy után ez NEM indul el — ott managed Postgres DATABASE_URL kell.
+- docker-compose: postgres:16 + healthcheck (pg_isready) + persistent volume `postgres_data`,
+  backend `depends_on: service_healthy`, minden credential env-referencia. `.env.example` a gyökérben és backendben.
+- Teszt: `tests/pg_migration_smoke.py` — 34/34 PASS (auth, JWT, /me, bankrollok, bets CRUD,
+  analytics, limits, pagination, user isolation, CSV import/export, PDF create/list/download/delete, cascade).
